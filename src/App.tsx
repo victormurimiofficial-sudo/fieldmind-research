@@ -167,7 +167,7 @@ function App() {
     };
     boot();
     return () => { alive = false; };
-  }, []););
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -189,12 +189,10 @@ function App() {
         setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
       }
       setToast(mapped.length ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.' : 'The form is reachable, but no questions were mapped.');
-    } catch {
+    } catch (e) {
       setFields([]);
-      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: 'Inspection failed' });
-      setToast(
-        'Could not inspect that Kobo link. Check the URL and try again.'
-      );
+      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: e instanceof Error ? e.message : 'Inspection failed' });
+      setToast(e instanceof Error ? e.message : 'Could not inspect that Kobo form.');
     }
   };
 
@@ -468,12 +466,14 @@ function App() {
                 <div className="hero-actions">
                   <button
                     className="primary"
+                    disabled={backendState !== 'ready'}
                     onClick={() => setPage('projects')}
                   >
                     <Plus size={17} /> New project
                   </button>
                   <button
                     className="secondary"
+                    disabled={backendState !== 'ready'}
                     onClick={() => setPage('review')}
                   >
                     Open review queue <ArrowRight size={16} />
