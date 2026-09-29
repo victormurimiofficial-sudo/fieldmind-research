@@ -31,18 +31,14 @@ type Draft = {
 
 const TABLE = 'fieldmind_records';
 
-const defaultProject = {
-  name: 'Thika Level 5 NCD Community Study',
-  location: 'Thika Level 5 Hospital, Kiambu County',
-  topic: 'Health-seeking behavior for non-communicable diseases among adult men',
-  koboUrl: 'https://ee.kobotoolbox.org/x/IowlqBLK',
-  formStatus: 'Needs inspection',
-  offlineReady: false,
-  researchCount: 0,
-  draftCount: 0,
-  approvedCount: 0,
-  updatedAt: 'Today',
-};
+const LEGACY_DEMO_NAME = 'thika level 5 ncd study';
+const LEGACY_DEMO_KOBO_UID = 'iowlqblk';
+
+function isLegacyDemoProject(project: AnyRecord) {
+  const name = String(project.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const kobo = String(project.koboUrl || '').toLowerCase();
+  return name === LEGACY_DEMO_NAME && kobo.includes(LEGACY_DEMO_KOBO_UID);
+}
 
 function db() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -90,33 +86,31 @@ async function remove(id: string) {
 }
 
 async function seed() {
-  // Never create a project from application code. Projects must come from the workspace owner.
-  // Remove the legacy demo project only when it is still completely untouched.
+  // Never create a project from application code.
+  // Clean only the exact legacy demo record created by the old build so a fresh
+  // workspace cannot reopen with the previous hard-coded Thika project.
   const projects = await list<AnyRecord>('projects', 100);
   if (!projects.length) return [];
-  const legacy = projects.filter(
-    project =>
-      project.name === defaultProject.name &&
-      project.location === defaultProject.location &&
-      project.koboUrl === defaultProject.koboUrl
-  );
-  if (legacy.length) {
-    const [drafts, sources] = await Promise.all([
-      list<Draft>('drafts', 1000),
-      list<AnyRecord>('sources', 1000),
-    ]);
-    const legacyIds = new Set(legacy.map(project => String(project.id)));
-    const touchedIds = new Set([
-      ...drafts.filter(draft => legacyIds.has(String(draft.projectId))).map(draft => String(draft.projectId)),
-      ...sources.filter(source => legacyIds.has(String(source.projectId))).map(source => String(source.projectId)),
-    ]);
-    const untouchedLegacy = legacy.filter(project => !touchedIds.has(String(project.id)));
-    if (untouchedLegacy.length) {
-      await Promise.all(untouchedLegacy.map(project => remove(String(project.id))));
-      return projects.filter(project => !untouchedLegacy.some(item => String(item.id) === String(project.id)));
-    }
-  }
-  return projects;
+
+  const legacy = projects.filter(isLegacyDemoProject);
+  if (!legacy.length) return projects;
+
+  const [drafts, sources] = await Promise.all([
+    list<Draft>('drafts', 1000),
+    list<AnyRecord>('sources', 1000),
+  ]);
+
+  const legacyIds = new Set(legacy.map(project => String(project.id)));
+  const relatedDrafts = drafts.filter(draft => legacyIds.has(String(draft.projectId)));
+  const relatedSources = sources.filter(source => legacyIds.has(String(source.projectId)));
+
+  await Promise.all([
+    ...relatedDrafts.map(draft => remove(String(draft.id))),
+    ...relatedSources.map(source => remove(String(source.id))),
+    ...legacy.map(project => remove(String(project.id))),
+  ]);
+
+  return projects.filter(project => !legacyIds.has(String(project.id)));
 }
 
 async function projectsWithStats() {
@@ -144,6 +138,7 @@ function send(res: any, status: number, payload: any) {
   res
     .status(status)
     .setHeader('Content-Type', 'application/json; charset=utf-8')
+    .setHeader('Cache-Control', 'no-store, max-age=0')
     .json(payload);
 }
 
@@ -344,8 +339,8 @@ async function inspectKobo(url: string, source: string, token: string) {
   if (uid) {
     for (const base of ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org']) {
       for (const endpoint of [
-        '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
         '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
+        '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
       ]) {
         try {
           const result = await fetchText(base + endpoint, headers);
@@ -543,7 +538,15 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const path = new URL(req.url || '/', 'https://fieldmind.local').pathname.replace(/\/$/, '') || '/';
+    const requestUrl = new URL(req.url || '/', 'https://fieldmind.local');
+    const pathname = requestUrl.pathname.replace(/\/$/, '') || '/';
+    const queryPath = req.query?.path;
+    const catchallPath = Array.isArray(queryPath)
+      ? queryPath.join('/')
+      : typeof queryPath === 'string'
+        ? queryPath
+        : '';
+    const path = (catchallPath ? '/api/' + catchallPath.replace(/^\/+/, '') : pathname).replace(/\/$/, '') || '/';
     const body = bodyOf(req);
 
     if (req.method === 'GET' && path === '/api/_healthcheck') {
@@ -806,7 +809,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    send(res, 404, { message: 'Route not found' });
+    send(res, 404, { message: 'Route not found: ' + path });
   } catch (error) {
     console.error('FieldMind API error', error);
     send(res, 500, {
