@@ -244,6 +244,8 @@ function App() {
         ? result.data.drafts
         : [];
       setDrafts(d => [...incoming, ...d]);
+      setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, draftCount: (p.draftCount || 0) + incoming.length } : p));
+      setSelectedProject(p => ({ ...p, draftCount: (p.draftCount || 0) + incoming.length }));
       setPage('review');
       setToast(incoming.length + ' complete synthetic QA records created.');
     } catch (e) {
@@ -279,6 +281,8 @@ function App() {
     try {
       await api.delete('/api/drafts/' + draftId);
       setDrafts(all => all.filter(d => d.id !== draftId));
+      setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, draftCount: Math.max(0, (p.draftCount || 0) - 1) } : p));
+      setSelectedProject(p => ({ ...p, draftCount: Math.max(0, (p.draftCount || 0) - 1) }));
       setToast('Synthetic record deleted.');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Could not delete the record.');
