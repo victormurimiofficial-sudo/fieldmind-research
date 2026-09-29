@@ -90,12 +90,33 @@ async function remove(id: string) {
 }
 
 async function seed() {
-  const projects = await list<AnyRecord>('projects', 10);
+  const projects = await list<AnyRecord>('projects', 100);
   if (projects.length) return projects;
   const ids = await insert('projects', [defaultProject]);
   return [{ ...defaultProject, id: ids[0] }];
 }
 
+async function projectsWithStats() {
+  const projects = await seed();
+  const [drafts, sources] = await Promise.all([
+    list<Draft>('drafts', 1000),
+    list<AnyRecord>('sources', 1000),
+  ]);
+
+  return projects.map(project => {
+    const projectDrafts = drafts.filter(draft => draft.projectId === project.id);
+    const projectSources = sources.filter(source => source.projectId === project.id);
+    return {
+      ...project,
+      researchCount: projectSources.length,
+      draftCount: projectDrafts.length,
+      approvedCount: projectDrafts.filter(
+        draft => draft.status === 'confirmed' || draft.status === 'deployed'
+      ).length,
+      updatedAt: project.updatedAt || 'Saved',
+    };
+  });
+}
 function send(res: any, status: number, payload: any) {
   res
     .status(status)
@@ -513,7 +534,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'GET' && path === '/api/projects') {
-      send(res, 200, { projects: await seed() });
+      send(res, 200, { projects: await projectsWithStats() });
       return;
     }
 
