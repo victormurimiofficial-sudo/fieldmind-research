@@ -338,12 +338,27 @@ async function inspectKobo(url: string, source: string, token: string) {
 
   if (uid) {
     for (const base of ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org']) {
-      for (const endpoint of [
+      const assetUrl = base + '/api/v2/assets/' + encodeURIComponent(uid) + '/';
+      const endpoints = [
         '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
         '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
-      ]) {
+      ];
+
+      // First ask Kobo for the asset metadata. When available, xform_link is
+      // the authoritative URL for the deployed questionnaire definition.
+      try {
+        const detail = await fetchText(assetUrl, headers);
+        if (detail.response.ok) {
+          const metadata = JSON.parse(detail.text) as AnyRecord;
+          if (typeof metadata.xform_link === 'string' && metadata.xform_link) {
+            endpoints.unshift(metadata.xform_link);
+          }
+        }
+      } catch {}
+
+      for (const endpoint of Array.from(new Set(endpoints))) {
         try {
-          const result = await fetchText(base + endpoint, headers);
+          const result = await fetchText(endpoint.startsWith('http') ? endpoint : base + endpoint, headers);
           if (!result.response.ok) continue;
           const parsed = parseXForm(result.text);
           if (parsed.fields.length) {
