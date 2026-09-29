@@ -58,6 +58,7 @@ export default async function handler(req:any,res:any){
   const path=new URL(req.url||'/', 'https://fieldmind.local').pathname.replace(/\\/$/,'')||'/';const body=bodyOf(req);
   if(req.method==='GET'&&path==='/api/_healthcheck'){const configured=Boolean(process.env.SUPABASE_URL&&(process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY));send(res,200,{ok:true,database:configured?'configured':'missing',ai:process.env.OPENAI_API_KEY?'configured':'missing'});return}
   if(req.method==='GET'&&path==='/api/projects'){send(res,200,{projects:await seed()});return}
+  if(req.method==='PUT'&&path.match(/^\\/api\\/projects\\/([^/]+)$/)){const id=path.match(/^\\/api\\/projects\\/([^/]+)$/)?.[1]||'';const ok=await update(id,{...body,id});send(res,ok?200:404,{project:{...body,id}});return}
   if(req.method==='POST'&&path==='/api/projects'){if(!body.name||!body.location||!body.topic){send(res,400,{message:'Project name, location and topic are required'});return}const ids=await insert('projects',[body]);send(res,200,{project:{...body,id:ids[0]}});return}
   if(req.method==='GET'&&path==='/api/drafts'){send(res,200,{drafts:await list<Draft>('drafts',500)});return}
   if(req.method==='GET'&&path==='/api/sources'){const projectId=new URL(req.url||'https://fieldmind.local','https://fieldmind.local').searchParams.get('projectId')||'';const all=await list<AnyRecord>('sources',500);send(res,200,{sources:projectId?all.filter(s=>String(s.projectId||'')===projectId):all});return}
