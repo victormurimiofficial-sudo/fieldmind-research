@@ -26,7 +26,7 @@ function clean(value: string) {
 }
 
 function attr(source: string, key: string) {
-  const match = source.match(new RegExp('\\b' + key + '=["\\']([^"\\']*)["\\']', 'i'));
+  const match = source.match(new RegExp("\\b" + key + "=[\\\"']([^\\\"']*)[\\\"']", "i"));
   return match?.[1] || '';
 }
 
