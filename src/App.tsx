@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 const api = {
   async request(method: string, url: string, body?: unknown) {
-    const response = await fetch(url, { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.message || 'Request failed');
+    let response: Response;
+    try {
+      response = await fetch(url, { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch {
+      throw new Error('Could not reach the FieldMind backend. Check the deployment and try again.');
+    }
+    const raw = await response.text().catch(() => '');
+    let data: any = {};
+    try { data = raw ? JSON.parse(raw) : {}; } catch {
+      data = {};
+    }
+    if (!response.ok) {
+      throw new Error(data?.message || ('Request failed (' + response.status + ')'));
+    }
     return { data };
   },
   get(url: string) { return this.request('GET', url); },
@@ -116,7 +127,7 @@ function App() {
   const [koboSource, setKoboSource] = useState('');
   const [koboToken, setKoboToken] = useState('');
   const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
-  const [draftCount, setDraftCount] = useState(12);
+  const [draftCount, setDraftCount] = useState(1);
   const [backendState, setBackendState] = useState<'checking'|'ready'|'error'>('checking');
   const [ageMix, setAgeMix] = useState('18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
   const [majority, setMajority] = useState('No directional tendency');
@@ -192,8 +203,9 @@ function App() {
       setToast(mapped.length ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.' : 'The form is reachable, but no questions were mapped.');
     } catch (e) {
       setFields([]);
-      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: e instanceof Error ? e.message : 'Inspection failed' });
-      setToast(e instanceof Error ? e.message : 'Could not inspect that Kobo form.');
+      const message = e instanceof Error ? e.message : 'Could not inspect that Kobo form.';
+      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: message });
+      setToast('Kobo inspection: ' + message);
     }
   };
 
