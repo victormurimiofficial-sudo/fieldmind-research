@@ -732,9 +732,7 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      send(res, {
-        statusCode: 200,
-      } as any, {
+      send(res, 200, {
         filename: 'fieldmind-reviewed-synthetic-qa.csv',
         csv: toCsv(items),
         recordCount: items.length,
