@@ -100,17 +100,20 @@ async function seed() {
       project.location === defaultProject.location &&
       project.koboUrl === defaultProject.koboUrl
   );
-  if (legacy.length === projects.length) {
+  if (legacy.length) {
     const [drafts, sources] = await Promise.all([
       list<Draft>('drafts', 1000),
       list<AnyRecord>('sources', 1000),
     ]);
     const legacyIds = new Set(legacy.map(project => String(project.id)));
-    const touched = drafts.some(draft => legacyIds.has(String(draft.projectId))) ||
-      sources.some(source => legacyIds.has(String(source.projectId)));
-    if (!touched) {
-      await Promise.all(legacy.map(project => remove(String(project.id))));
-      return [];
+    const touchedIds = new Set([
+      ...drafts.filter(draft => legacyIds.has(String(draft.projectId))).map(draft => String(draft.projectId)),
+      ...sources.filter(source => legacyIds.has(String(source.projectId))).map(source => String(source.projectId)),
+    ]);
+    const untouchedLegacy = legacy.filter(project => !touchedIds.has(String(project.id)));
+    if (untouchedLegacy.length) {
+      await Promise.all(untouchedLegacy.map(project => remove(String(project.id))));
+      return projects.filter(project => !untouchedLegacy.some(item => String(item.id) === String(project.id)));
     }
   }
   return projects;
