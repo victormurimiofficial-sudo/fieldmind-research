@@ -504,7 +504,7 @@ function App() {
                 <div className="research-card">
                   <div className="mini-top">
                     <span>
-                      <FlaskConical size={14} /> THIKA LEVEL 5
+                      <FlaskConical size={14} /> {selectedProject.id ? selectedProject.name.toUpperCase() : 'YOUR PROJECT'}
                     </span>
                     <span className="live-chip">WORKSPACE</span>
                   </div>
@@ -1105,7 +1105,7 @@ function App() {
                   onChange={e =>
                     setNewProject({ ...newProject, name: e.target.value })
                   }
-                  placeholder="e.g. Thika Level 5 NCD study"
+                  placeholder="e.g. Community health study"
                 />
               </label>
               <label>
