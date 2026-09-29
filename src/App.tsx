@@ -1,0 +1,1088 @@
+import { useEffect, useMemo, useState } from 'react';
+const api = {
+  async request(method: string, url: string, body?: unknown) {
+    const response = await fetch(url, { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.message || 'Request failed');
+    return { data };
+  },
+  get(url: string) { return this.request('GET', url); },
+  post(url: string, body?: unknown) { return this.request('POST', url, body); },
+  put(url: string, body?: unknown) { return this.request('PUT', url, body); },
+  delete(url: string) { return this.request('DELETE', url); },
+};
+import {
+  Activity,
+  ArrowRight,
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  Database,
+  FileCheck2,
+  FileSpreadsheet,
+  FlaskConical,
+  Globe2,
+  Layers3,
+  Link2,
+  Menu,
+  MessageSquareText,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Wifi,
+  WifiOff,
+  X,
+  Zap,
+} from 'lucide-react';
+
+type Project = {
+  id: string;
+  name: string;
+  location: string;
+  topic: string;
+  koboUrl: string;
+  formStatus: string;
+  offlineReady: boolean;
+  researchCount: number;
+  draftCount: number;
+  approvedCount: number;
+  updatedAt: string;
+};
+
+type Source = {
+  id: string;
+  title: string;
+  facility: string;
+  year: number;
+  type: string;
+  finding: string;
+};
+
+type DraftField = {
+  name: string;
+  label: string;
+  value: string;
+  confidence: number;
+  evidence: string;
+  status: 'review' | 'approved' | 'rejected';
+};
+
+type FormField = { name: string; label: string; type: string; required?: boolean; options?: { name: string; label: string }[] };
+type Draft = {
+  id: string;
+  projectId: string;
+  label: string;
+  mode: 'synthetic';
+  fields: DraftField[];
+  createdAt: string;
+  status?: 'review' | 'confirmed' | 'deployed';
+};
+
+const sampleProject: Project = {
+  id: 'demo-thika',
+  name: 'Thika Level 5 NCD Community Study',
+  location: 'Thika Level 5 Hospital, Kiambu County',
+  topic:
+    'Health-seeking behavior for non-communicable diseases among adult men',
+  koboUrl: 'https://ee.kobotoolbox.org/x/IowlqBLK',
+  formStatus: 'Connected',
+  offlineReady: true,
+  researchCount: 6,
+  draftCount: 12,
+  approvedCount: 0,
+  updatedAt: 'Today',
+};
+
+const sampleSources: Source[] = [
+  {
+    id: 's1',
+    title: 'NCD care-seeking patterns in Kiambu',
+    facility: 'Kiambu County',
+    year: 2024,
+    type: 'Local study',
+    finding:
+      'Reports barriers around cost, waiting time and perceived severity.',
+  },
+  {
+    id: 's2',
+    title: 'Male health-seeking behaviour review',
+    facility: 'Kenya',
+    year: 2023,
+    type: 'Literature',
+    finding:
+      'Men may delay formal care when symptoms are perceived as manageable.',
+  },
+  {
+    id: 's3',
+    title: 'Thika outpatient service assessment',
+    facility: 'Thika Level 5',
+    year: 2022,
+    type: 'Facility evidence',
+    finding:
+      'Outpatient service use varies by perceived urgency and access constraints.',
+  },
+];
+
+const nav = [
+  { key: 'overview', label: 'Overview', icon: Activity },
+  { key: 'projects', label: 'Projects', icon: Layers3 },
+  { key: 'research', label: 'Research library', icon: BookOpen },
+  { key: 'review', label: 'Review queue', icon: ClipboardCheck },
+  { key: 'export', label: 'Export', icon: FileSpreadsheet },
+];
+
+function App() {
+  const [page, setPage] = useState('overview');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([sampleProject]);
+  const [sources, setSources] = useState<Source[]>(sampleSources);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [selectedProject, setSelectedProject] = useState<Project>(sampleProject);
+  const [fields, setFields] = useState<FormField[]>([]);
+  const [koboUrl, setKoboUrl] = useState(sampleProject.koboUrl);
+  const [koboSource, setKoboSource] = useState('');
+  const [koboToken, setKoboToken] = useState('');
+  const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+  const [draftCount, setDraftCount] = useState(12);
+  const [ageMix, setAgeMix] = useState('18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
+  const [majority, setMajority] = useState('No directional tendency');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [toast, setToast] = useState('');
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [newProject, setNewProject] = useState({
+    name: '',
+    location: '',
+    topic: '',
+    koboUrl: '',
+  });
+
+  const projectDrafts = useMemo(() => drafts.filter(d => d.projectId === selectedProject.id), [drafts, selectedProject.id]);
+  const pending = projectDrafts.filter(d => d.status !== 'confirmed' && d.status !== 'deployed').length;
+  const confirmed = projectDrafts.length > 0 && projectDrafts.every(d => d.status === 'confirmed' || d.status === 'deployed');
+  const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
+
+  useEffect(() => {
+    api
+      .get('/api/projects')
+      .then(r => {
+        if (Array.isArray(r.data?.projects) && r.data.projects.length) {
+          setProjects(r.data.projects);
+          setSelectedProject(r.data.projects[0]);
+        }
+      })
+      .catch(() => {});
+    api
+      .get('/api/drafts')
+      .then(r => {
+        if (Array.isArray(r.data?.drafts)) setDrafts(r.data.drafts);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(''), 2800);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  const checkKobo = async () => {
+    setKoboState(s => ({ ...s, checked: false }));
+    try {
+      const result = await api.post('/api/kobo/inspect', { url: koboUrl, assetUid: koboSource.trim(), apiToken: koboToken.trim() });
+      const mapped = Array.isArray(result.data?.fields) ? result.data.fields : [];
+      setFields(mapped);
+      setKoboState({ checked: true, offline: Boolean(result.data?.offlineReady), title: result.data?.title || 'Kobo form', questionCount: mapped.length, error: '' });
+      setToast(mapped.length ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.' : 'The form is reachable, but no questions were mapped.');
+    } catch {
+      setFields([]);
+      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: 'Inspection failed' });
+      setToast(
+        'Could not inspect that Kobo link. Check the URL and try again.'
+      );
+    }
+  };
+
+  const createProject = async () => {
+    if (!newProject.name || !newProject.location || !newProject.topic) {
+      setToast('Add a project name, location and research topic.');
+      return;
+    }
+    const project: Project = {
+      id: 'p-' + Date.now(),
+      name: newProject.name,
+      location: newProject.location,
+      topic: newProject.topic,
+      koboUrl: newProject.koboUrl,
+      formStatus: newProject.koboUrl ? 'Connected' : 'Not connected',
+      offlineReady: false,
+      researchCount: 0,
+      draftCount: 0,
+      approvedCount: 0,
+      updatedAt: 'Just now',
+    };
+    try {
+      await api.post('/api/projects', project);
+    } catch {}
+    setProjects(p => [project, ...p]);
+    setSelectedProject(project);
+    setNewProject({ name: '', location: '', topic: '', koboUrl: '' });
+    setShowNewProject(false);
+    setPage('projects');
+    setToast('Project created.');
+  };
+
+  const generateDrafts = async () => {
+    if (!koboState.checked || !fields.length) { setToast('Inspect the Kobo form first. Generation is blocked without mapped questions.'); return; }
+    setIsGenerating(true);
+    try {
+      const result = await api.post('/api/ai/drafts', {
+        project: selectedProject,
+        sources,
+        fields,
+        count: draftCount,
+        ageMix,
+        majority,
+      });
+      const incoming = Array.isArray(result.data?.drafts)
+        ? result.data.drafts
+        : [];
+      setDrafts(d => [...incoming, ...d]);
+      setPage('review');
+      setToast(incoming.length + ' complete synthetic QA records created.');
+    } catch {
+      setToast('AI generation failed. Try again.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const approveField = async (draftId: string, fieldName: string) => {
+    const target = drafts.find(d => d.id === draftId);
+    if (!target) return;
+    const fields = target.fields.map(f =>
+      f.name === fieldName ? { ...f, status: 'approved' as const } : f
+    );
+    const updated = { ...target, fields };
+    setDrafts(all => all.map(d => (d.id === draftId ? updated : d)));
+    try {
+      await api.put('/api/drafts/' + draftId, updated);
+    } catch {}
+  };
+
+  const rejectField = async (draftId: string, fieldName: string) => {
+    const target = drafts.find(d => d.id === draftId);
+    if (!target) return;
+    const fields = target.fields.map(f =>
+      f.name === fieldName ? { ...f, status: 'rejected' as const } : f
+    );
+    const updated = { ...target, fields };
+    setDrafts(all => all.map(d => (d.id === draftId ? updated : d)));
+    try {
+      await api.put('/api/drafts/' + draftId, updated);
+    } catch {}
+  };
+
+  const deleteDraft = async (draftId: string) => {
+    try { await api.delete('/api/drafts/' + draftId); } catch {}
+    setDrafts(all => all.filter(d => d.id !== draftId)); setToast('Synthetic record deleted.');
+  };
+
+  const editDraft = async (draft: Draft) => {
+    const raw = window.prompt('Edit fixture values as JSON', JSON.stringify(Object.fromEntries(draft.fields.map(f => [f.name, f.value])), null, 2));
+    if (!raw) return;
+    try {
+      const values = JSON.parse(raw) as Record<string, string>;
+      const updated = { ...draft, status: 'review' as const, fields: draft.fields.map(f => ({ ...f, value: values[f.name] === undefined ? f.value : String(values[f.name]), status: 'review' as const })) };
+      await api.put('/api/drafts/' + draft.id, updated); setDrafts(all => all.map(d => d.id === draft.id ? updated : d)); setToast('Changes saved. The record returned to review.');
+    } catch { setToast('Invalid JSON. No changes were saved.'); }
+  };
+
+  const confirmAll = async () => {
+    if (!projectDrafts.length) { setToast('There are no records to confirm.'); return; }
+    if (fields.length && projectDrafts.some(d => d.fields.length !== fields.length)) { setToast('Confirmation blocked: a record is missing mapped questions.'); return; }
+    try {
+      const result = await api.post('/api/drafts/confirm-all', { projectId: selectedProject.id });
+      setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'confirmed', fields: d.fields.map(f => ({ ...f, status: 'approved' as const })) } : d));
+      setToast(result.data?.message || 'Everything is confirmed.');
+    } catch { setToast('Confirmation failed.'); }
+  };
+
+  const deployPackage = async () => {
+    if (!confirmed) { setToast('Deployment is locked until every record is confirmed.'); return; }
+    try {
+      const result = await api.post('/api/drafts/deploy', { projectId: selectedProject.id });
+      setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'deployed' } : d)); setToast(result.data?.message || 'Controlled QA package prepared.');
+    } catch { setToast('Package preparation failed.'); }
+  };
+
+  const navTo = (key: string) => {
+    setPage(key);
+    setMobileOpen(false);
+  };
+
+  return (
+    <div className="shell">
+      <aside className={'sidebar ' + (mobileOpen ? 'open' : '')}>
+        <div className="brand">
+          <div className="brand-mark">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <strong>FieldMind</strong>
+            <span>Research AI</span>
+          </div>
+        </div>
+        <div className="workspace-label">WORKSPACE</div>
+        <nav>
+          {nav.map(item => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                className={page === item.key ? 'nav-item active' : 'nav-item'}
+                onClick={() => navTo(item.key)}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+                {item.key === 'review' && pending > 0 ? <b>{pending}</b> : null}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="side-card">
+          <div className="side-card-icon">
+            <ShieldCheck size={17} />
+          </div>
+          <strong>Human review is on</strong>
+          <p>
+            AI drafts cannot become approved research records automatically.
+          </p>
+        </div>
+        <div className="sidebar-foot">
+          <span className="status-dot" /> System operational
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <button
+            className="mobile-menu"
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
+            <Menu size={21} />
+          </button>
+          <div>
+            <div className="eyebrow">RESEARCH WORKSPACE</div>
+            <h1>
+              {page === 'overview'
+                ? 'Research command centre'
+                : nav.find(n => n.key === page)?.label}
+            </h1>
+          </div>
+          <div className="top-actions">
+            <button className="icon-btn">
+              <MessageSquareText size={18} />
+            </button>
+            <div className="avatar">FM</div>
+          </div>
+        </header>
+
+        {page === 'overview' && (
+          <section className="content">
+            <div className="hero">
+              <div className="hero-copy">
+                <div className="pill">
+                  <span className="pulse" /> AI-assisted field research
+                </div>
+                <h2>
+                  Turn local research context into{' '}
+                  <em>reviewable field drafts.</em>
+                </h2>
+                <p>
+                  Connect a Kobo form, load evidence from the study area, then
+                  generate structured synthetic records for a trained
+                  community-health workflow.
+                </p>
+                <div className="hero-actions">
+                  <button
+                    className="primary"
+                    onClick={() => setPage('projects')}
+                  >
+                    <Plus size={17} /> New project
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() => setPage('review')}
+                  >
+                    Open review queue <ArrowRight size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="hero-visual">
+                <div className="orb orb-one" />
+                <div className="orb orb-two" />
+                <div className="research-card">
+                  <div className="mini-top">
+                    <span>
+                      <FlaskConical size={14} /> THIKA LEVEL 5
+                    </span>
+                    <span className="live-chip">LIVE</span>
+                  </div>
+                  <div className="signal-row">
+                    <div>
+                      <small>Evidence coverage</small>
+                      <strong>84%</strong>
+                    </div>
+                    <div className="ring">
+                      <span>AI</span>
+                    </div>
+                  </div>
+                  <div className="bar">
+                    <i style={{ width: '84%' }} />
+                  </div>
+                  <div className="mini-grid">
+                    <span>
+                      <Database size={14} /> 6 sources
+                    </span>
+                    <span>
+                      <ClipboardCheck size={14} /> 12 drafts
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="stats">
+              <Stat
+                label="Active projects"
+                value={projects.length}
+                icon={Layers3}
+              />
+              <Stat
+                label="Evidence sources"
+                value={sources.length}
+                icon={BookOpen}
+              />
+              <Stat
+                label="Pending review"
+                value={pending || selectedProject.draftCount}
+                icon={ClipboardCheck}
+              />
+              <Stat
+                label="Approved records"
+                value={approved}
+                icon={FileCheck2}
+              />
+            </div>
+
+            <div className="section-head">
+              <div>
+                <h3>Current project</h3>
+                <p>Everything needed to prepare the next research run.</p>
+              </div>
+              <button className="text-btn" onClick={() => setPage('projects')}>
+                Manage projects <ChevronRight size={15} />
+              </button>
+            </div>
+            <div className="project-panel">
+              <div className="project-main">
+                <div className="project-icon">
+                  <Activity size={21} />
+                </div>
+                <div>
+                  <h3>{selectedProject.name}</h3>
+                  <p>{selectedProject.location}</p>
+                  <div className="tags">
+                    <span>{selectedProject.topic}</span>
+                    <span className="green-tag">
+                      <Check size={12} /> {selectedProject.formStatus}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="project-meta">
+                <div>
+                  <small>Kobo mode</small>
+                  <strong>
+                    {selectedProject.offlineReady
+                      ? 'Online + offline'
+                      : 'Needs check'}
+                  </strong>
+                </div>
+                <div>
+                  <small>Research library</small>
+                  <strong>{sources.length} sources</strong>
+                </div>
+                <button
+                  className="round-btn"
+                  onClick={() => setPage('projects')}
+                >
+                  <ArrowRight size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div className="two-col">
+              <div className="panel">
+                <div className="panel-head">
+                  <div>
+                    <h3>Kobo connection</h3>
+                    <p>Verify the form before an AI run.</p>
+                  </div>
+                  <Link2 size={18} />
+                </div>
+                <div className="url-row">
+                  <input
+                    value={koboUrl}
+                    onChange={e => setKoboUrl(e.target.value)}
+                  />
+                  <button onClick={checkKobo}>
+                    <RefreshCw size={15} /> Check
+                  </button>
+                </div>
+                <div className="kobo-source"><label className="field-label">Kobo project URL or Asset UID <span>optional</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="Paste project URL or Asset UID for exact XForm mapping" /><label className="field-label">Kobo API key <span>optional · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Only needed for private forms" autoComplete="off" /></div>
+                <div className="connection-result">
+                  <span
+                    className={koboState.offline ? 'check-icon' : 'warn-icon'}
+                  >
+                    {koboState.offline ? (
+                      <Wifi size={15} />
+                    ) : (
+                      <WifiOff size={15} />
+                    )}
+                  </span>
+                  <div>
+                    <strong>{koboState.title}</strong>
+                    <small>
+                      {koboState.offline
+                        ? 'Offline-capable collection detected'
+                        : 'Online connection available; verify offline mode'}
+                    </small>
+                  </div>
+                  <span
+                    className={
+                      koboState.offline ? 'badge green' : 'badge amber'
+                    }
+                  >
+                    {koboState.offline ? 'READY' : 'CHECK'}
+                  </span>
+                </div>
+              </div>
+              <div className="panel ai-panel">
+                <div className="panel-head">
+                  <div>
+                    <h3>Generate synthetic drafts</h3>
+                    <p>
+                      AI behaves like a trained field researcher, but every
+                      answer stays reviewable.
+                    </p>
+                  </div>
+                  <Zap size={18} />
+                </div>
+                <div className="count-row">
+                  <label>Draft records</label>
+                  <div className="stepper">
+                    <button
+                      onClick={() => setDraftCount(Math.max(1, draftCount - 1))}
+                    >
+                      −
+                    </button>
+                    <strong>{draftCount}</strong>
+                    <button
+                      onClick={() =>
+                        setDraftCount(Math.min(100, draftCount + 1))
+                      }
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <button
+                  className="generate"
+                  disabled={isGenerating}
+                  onClick={generateDrafts}
+                >
+                  {isGenerating ? (
+                    <RefreshCw className="spin" size={16} />
+                  ) : (
+                    <Sparkles size={16} />
+                  )}
+                  {isGenerating ? 'Generating…' : 'Generate for review'}{' '}
+                  <ArrowRight size={15} />
+                </button>
+                <div className="ai-note">
+                  <ShieldCheck size={14} /> Generated records are explicitly
+                  marked synthetic and require human approval.
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {page === 'projects' && (
+          <section className="content">
+            <div className="page-intro">
+              <div>
+                <p className="eyebrow">PROJECTS</p>
+                <h2>Research projects</h2>
+                <p>Keep each study, Kobo form and evidence base together.</p>
+              </div>
+              <button
+                className="primary"
+                onClick={() => setShowNewProject(true)}
+              >
+                <Plus size={17} /> New project
+              </button>
+            </div>
+            <div className="project-list">
+              {projects.map(p => (
+                <button
+                  key={p.id}
+                  className={
+                    'project-row ' +
+                    (selectedProject.id === p.id ? 'selected' : '')
+                  }
+                  onClick={() => setSelectedProject(p)}
+                >
+                  <div className="project-icon">
+                    <FlaskConical size={19} />
+                  </div>
+                  <div className="row-copy">
+                    <strong>{p.name}</strong>
+                    <span>{p.location}</span>
+                  </div>
+                  <div className="row-stats">
+                    <span>{p.researchCount} sources</span>
+                    <span>{p.draftCount} drafts</span>
+                    <span className="badge green">{p.formStatus}</span>
+                  </div>
+                  <ChevronRight size={17} />
+                </button>
+              ))}
+            </div>
+            <div className="builder-grid">
+              <div className="panel">
+                <div className="panel-head">
+                  <div>
+                    <h3>{selectedProject.name}</h3>
+                    <p>{selectedProject.topic}</p>
+                  </div>
+                  <span className="badge green">ACTIVE</span>
+                </div>
+                <label className="field-label">Kobo form URL</label>
+                <div className="url-row">
+                  <input
+                    value={koboUrl}
+                    onChange={e => setKoboUrl(e.target.value)}
+                  />
+                  <button onClick={checkKobo}>Inspect</button>
+                </div>
+                <div className="kobo-source"><label className="field-label">Kobo project URL or Asset UID <span>optional</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="Paste project URL or Asset UID for exact XForm mapping" /><label className="field-label">Kobo API key <span>optional · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Only needed for private forms" autoComplete="off" /></div>
+                <div className="field-map">
+                  <div className="field-map-head">
+                    <span>Detected form fields</span>
+                    <span>{fields.length} fields</span>
+                  </div>
+                  {fields.map(f => (
+                    <div className="field-item" key={f.name}>
+                      <span>{f.label}</span>
+                      <code>{f.name}</code>
+                      <small>{f.type}</small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="panel">
+                <div className="panel-head">
+                  <div>
+                    <h3>AI run settings</h3>
+                    <p>Set how many synthetic records you want prepared.</p>
+                  </div>
+                  <Sparkles size={18} />
+                </div>
+                <div className="setting">
+                  <div>
+                    <strong>Community-health reasoning</strong>
+                    <span>Context-aware fieldworker perspective</span>
+                  </div>
+                  <div className="toggle on">
+                    <i />
+                  </div>
+                </div>
+                <div className="setting">
+                  <div>
+                    <strong>Evidence grounding</strong>
+                    <span>Use only the research library provided</span>
+                  </div>
+                  <div className="toggle on">
+                    <i />
+                  </div>
+                </div>
+                <div className="setting">
+                  <div>
+                    <strong>Human confirmation</strong>
+                    <span>Required before export</span>
+                  </div>
+                  <div className="toggle on locked">
+                    <i />
+                  </div>
+                </div>
+                <div className="count-row large">
+                  <label>Number of draft records</label>
+                  <div className="stepper">
+                    <button
+                      onClick={() => setDraftCount(Math.max(1, draftCount - 1))}
+                    >
+                      −
+                    </button>
+                    <strong>{draftCount}</strong>
+                    <button
+                      onClick={() =>
+                        setDraftCount(Math.min(100, draftCount + 1))
+                      }
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <button
+                  className="generate"
+                  disabled={isGenerating}
+                  onClick={generateDrafts}
+                >
+                  <Sparkles size={16} />{' '}
+                  {isGenerating ? 'Generating…' : 'Run AI preparation'}{' '}
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {page === 'research' && (
+          <section className="content">
+            <div className="page-intro">
+              <div>
+                <p className="eyebrow">EVIDENCE</p>
+                <h2>Research library</h2>
+                <p>
+                  Context the AI may use when preparing drafts for{' '}
+                  {selectedProject.location}.
+                </p>
+              </div>
+              <button
+                className="secondary"
+                onClick={() =>
+                  setToast(
+                    'Source entry editor is ready for the next build step.'
+                  )
+                }
+              >
+                <Plus size={16} /> Add source
+              </button>
+            </div>
+            <div className="evidence-banner">
+              <ShieldCheck size={19} />
+              <div>
+                <strong>Grounding rule</strong>
+                <p>
+                  The model is instructed to distinguish documented evidence
+                  from inference. It should not invent a citation, statistic or
+                  facility-specific fact.
+                </p>
+              </div>
+            </div>
+            <div className="source-list">
+              {sources.map(s => (
+                <div className="source-card" key={s.id}>
+                  <div className="source-type">{s.type}</div>
+                  <h3>{s.title}</h3>
+                  <div className="source-meta">
+                    <span>{s.facility}</span>
+                    <span>{s.year}</span>
+                  </div>
+                  <p>{s.finding}</p>
+                  <button className="source-link">
+                    View evidence <ArrowRight size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === 'review' && (
+          <section className="content">
+            <div className="page-intro">
+              <div>
+                <p className="eyebrow">QUALITY CONTROL</p>
+                <h2>Human review queue</h2>
+                <p>
+                  Nothing generated by the model becomes an approved record
+                  without a reviewer.
+                </p>
+              </div>
+              <div className="review-summary">
+                <span>
+                  <b>{projectDrafts.length}</b> drafts
+                </span>
+                <span>
+                  <b>{pending}</b> pending
+                </span>
+              </div>
+            </div>
+            {projectDrafts.length === 0 ? (
+              <div className="empty-state">
+                <ClipboardCheck size={30} />
+                <h3>No drafts yet</h3>
+                <p>
+                  Run an AI preparation from Overview or Projects to create
+                  synthetic records.
+                </p>
+                <button className="primary" onClick={() => setPage('overview')}>
+                  <Sparkles size={16} /> Start AI preparation
+                </button>
+              </div>
+            ) : (
+              <>
+              <div className="review-banner"><div><strong>{confirmed ? 'Run confirmed' : 'Review required'}</strong><p>{confirmed ? 'Package preparation is unlocked.' : 'Review, edit or delete records before final confirmation.'}</p></div><button className="primary" disabled={confirmed} onClick={confirmAll}><CheckCircle2 size={16}/> Confirm everything is okay</button></div>
+              <div className="review-list">
+                {projectDrafts.map((d, i) => (
+                  <div className="review-card" key={d.id}>
+                    <div className="review-head">
+                      <div>
+                        <span className="synthetic-badge">
+                          <Sparkles size={12} /> SYNTHETIC DRAFT
+                        </span>
+                        <h3>{d.label}</h3>
+                        <p>
+                          Generated {i === 0 ? 'just now' : 'in this run'} ·
+                          Requires fieldworker confirmation
+                        </p>
+                      </div>
+                      <div className="review-card-actions"><span className="review-number">#{projectDrafts.length - i}</span><button className="icon-small" onClick={() => editDraft(d)}>Edit</button><button className="icon-small danger" onClick={() => deleteDraft(d.id)}>Delete</button></div>
+                    </div>
+                    <div className="draft-fields">
+                      {d.fields.map(f => (
+                        <div className="draft-field" key={f.name}>
+                          <div className="draft-label">
+                            <strong>{f.label}</strong>
+                            <code>{f.name}</code>
+                          </div>
+                          <div className="draft-value">{f.value}</div>
+                          <div className="evidence">
+                            <span>{f.confidence}% confidence</span>
+                            <span>{f.evidence}</span>
+                          </div>
+                          <div className="field-actions">
+                            {f.status === 'approved' ? (
+                              <span className="approved">
+                                <CheckCircle2 size={15} /> Approved
+                              </span>
+                            ) : f.status === 'rejected' ? (
+                              <span className="rejected">
+                                <X size={15} /> Rejected
+                              </span>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => rejectField(d.id, f.name)}
+                                  className="reject"
+                                >
+                                  Reject
+                                </button>
+                                <button
+                                  onClick={() => approveField(d.id, f.name)}
+                                  className="approve"
+                                >
+                                  <Check size={14} /> Confirm
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {page === 'export' && (
+          <section className="content">
+            <div className="page-intro">
+              <div>
+                <p className="eyebrow">OUTPUT</p>
+                <h2>Export centre</h2>
+                <p>
+                  Prepare reviewed records for a controlled handoff to your Kobo
+                  workflow.
+                </p>
+              </div>
+            </div>
+            <div className="export-grid">
+              <div className="export-card">
+                <div className="export-icon">
+                  <FileSpreadsheet size={21} />
+                </div>
+                <h3>Reviewed XLSX</h3>
+                <p>
+                  Export field/value pairs from records whose individual fields
+                  have been confirmed.
+                </p>
+                <button
+                  className="secondary"
+                  disabled={!confirmed}
+                  onClick={deployPackage}
+                >
+                  {confirmed ? 'Prepare QA package' : 'Locked until confirmation'} <ArrowRight size={15} />
+                </button>
+              </div>
+              <div className="export-card">
+                <div className="export-icon">
+                  <Link2 size={21} />
+                </div>
+                <h3>Kobo handoff</h3>
+                <p>
+                  Open the connected form and let the fieldworker complete the
+                  final submission in Kobo.
+                </p>
+                <button
+                  className="secondary"
+                  onClick={() => window.open(selectedProject.koboUrl, '_blank')}
+                >
+                  Open Kobo form <ArrowRight size={15} />
+                </button>
+              </div>
+              <div className="export-card">
+                <div className="export-icon">
+                  <ShieldCheck size={21} />
+                </div>
+                <h3>Audit trail</h3>
+                <p>
+                  Every AI field carries its confidence, evidence note and
+                  review status before it can be treated as approved.
+                </p>
+                <div className="audit-count">
+                  <strong>{approved}</strong>
+                  <span>fully reviewed drafts</span>
+                </div>
+              </div>
+            </div>
+            <div className="evidence-banner">
+              <Wifi size={18} />
+              <div>
+                <strong>Offline collection</strong>
+                <p>
+                  Kobo's web form supports online/offline collection after the
+                  form has been cached, with submissions queued until
+                  connectivity returns. Your final submission should remain a
+                  controlled human action.
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {showNewProject && (
+          <div
+            className="modal-backdrop"
+            onClick={() => setShowNewProject(false)}
+          >
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <p className="eyebrow">NEW PROJECT</p>
+                  <h3>Create research project</h3>
+                </div>
+                <button onClick={() => setShowNewProject(false)}>
+                  <X size={18} />
+                </button>
+              </div>
+              <label>
+                Project name
+                <input
+                  value={newProject.name}
+                  onChange={e =>
+                    setNewProject({ ...newProject, name: e.target.value })
+                  }
+                  placeholder="e.g. Thika Level 5 NCD study"
+                />
+              </label>
+              <label>
+                Study location
+                <input
+                  value={newProject.location}
+                  onChange={e =>
+                    setNewProject({ ...newProject, location: e.target.value })
+                  }
+                  placeholder="Facility, town, county"
+                />
+              </label>
+              <label>
+                Research topic
+                <textarea
+                  value={newProject.topic}
+                  onChange={e =>
+                    setNewProject({ ...newProject, topic: e.target.value })
+                  }
+                  placeholder="What is this study investigating?"
+                />
+              </label>
+              <label>
+                Kobo form link <span className="optional">optional</span>
+                <input
+                  value={newProject.koboUrl}
+                  onChange={e =>
+                    setNewProject({ ...newProject, koboUrl: e.target.value })
+                  }
+                  placeholder="https://ee.kobotoolbox.org/x/..."
+                />
+              </label>
+              <button className="primary full" onClick={createProject}>
+                Create project <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {toast && (
+          <div className="toast">
+            <CheckCircle2 size={16} /> {toast}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  icon: typeof Activity;
+}) {
+  return (
+    <div className="stat">
+      <div className="stat-icon">
+        <Icon size={17} />
+      </div>
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
+}
+
+export default App;
