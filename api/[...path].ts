@@ -1,79 +1,778 @@
 import { createClient } from '@supabase/supabase-js';
 
 type AnyRecord = Record<string, any>;
-type FormField = { name:string; label:string; type:string; required:boolean; relevant?:string; constraint?:string; options?:Array<{name:string;label:string}> };
-type DraftField = { name:string; label:string; value:string; confidence:number; evidence:string; status:'review'|'approved'|'rejected' };
-type Draft = { id?:string; projectId:string; label:string; mode:'synthetic'; fields:DraftField[]; createdAt:string; status?:'review'|'confirmed'|'deployed' };
+type FormOption = { name: string; label: string };
+type FormField = {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  relevant?: string;
+  constraint?: string;
+  options?: FormOption[];
+};
+type DraftField = {
+  name: string;
+  label: string;
+  value: string;
+  confidence: number;
+  evidence: string;
+  status: 'review' | 'approved' | 'rejected';
+};
+type Draft = {
+  id?: string;
+  projectId: string;
+  label: string;
+  mode: 'synthetic';
+  fields: DraftField[];
+  createdAt: string;
+  status?: 'review' | 'confirmed' | 'deployed';
+};
 
-const table='fieldmind_records';
-const defaultProject={id:'demo-thika',name:'Thika Level 5 NCD Community Study',location:'Thika Level 5 Hospital, Kiambu County',topic:'Health-seeking behavior for non-communicable diseases among adult men',koboUrl:'https://ee.kobotoolbox.org/x/IowlqBLK',formStatus:'Needs inspection',offlineReady:false,researchCount:0,draftCount:0,approvedCount:0,updatedAt:'Today'};
+const TABLE = 'fieldmind_records';
 
-function db(){const url=process.env.SUPABASE_URL||process.env.NEXT_PUBLIC_SUPABASE_URL||'';const key=process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY||'';if(!url||!key)throw new Error('Supabase is not configured');return createClient(url,key,{auth:{autoRefreshToken:false,persistSession:false}})}
-async function list<T>(collection:string,limit=500){const {data,error}=await db().from(table).select('id,record').eq('collection',collection).order('created_at',{ascending:false}).limit(limit);if(error)throw error;return (data||[]).map((r:any)=>({...r.record,id:r.id})) as T[]}
-async function insert(collection:string,records:AnyRecord[]){const {data,error}=await db().from(table).insert(records.map(record=>({collection,record}))).select('id');if(error)throw error;return (data||[]).map((r:any)=>r.id)}
-async function update(id:string,record:AnyRecord){const {data,error}=await db().from(table).update({record,updated_at:new Date().toISOString()}).eq('id',id).select('id');if(error)throw error;return Boolean(data?.length)}
-async function remove(id:string){const {data,error}=await db().from(table).delete().eq('id',id).select('id');if(error)throw error;return Boolean(data?.length)}
-async function seed(){const p=await list<AnyRecord>('projects',10);if(p.length)return p;const ids=await insert('projects',[{...defaultProject}]);return [{...defaultProject,id:ids[0]}]}
-function csvCell(v:any){const s=String(v??'');return '"'+s.replace(/"/g,'""')+'"'}
-function toCsv(items:Draft[]){if(!items.length)return '';const names=Array.from(new Set(items.flatMap(d=>d.fields.map(f=>f.name))));const head=['record_id','label','status',...names];const rows=items.map(d=>[d.id,d.label,d.status||'review',...names.map(n=>d.fields.find(f=>f.name===n)?.value??'')]);return [head,...rows].map(r=>r.map(csvCell).join(',')).join('\\n')}
+const defaultProject = {
+  name: 'Thika Level 5 NCD Community Study',
+  location: 'Thika Level 5 Hospital, Kiambu County',
+  topic: 'Health-seeking behavior for non-communicable diseases among adult men',
+  koboUrl: 'https://ee.kobotoolbox.org/x/IowlqBLK',
+  formStatus: 'Needs inspection',
+  offlineReady: false,
+  researchCount: 0,
+  draftCount: 0,
+  approvedCount: 0,
+  updatedAt: 'Today',
+};
 
-function send(res:any,status:number,payload:any){res.status(status).setHeader('Content-Type','application/json; charset=utf-8').json(payload)}
-function bodyOf(req:any):AnyRecord{if(!req.body)return{};if(typeof req.body==='string'){try{return JSON.parse(req.body)}catch{return{}}}return req.body}
-function safeKobo(url:string){try{const u=new URL(url);return u.protocol==='https:'&&(u.hostname.endsWith('kobotoolbox.org')||u.hostname.endsWith('humanitarianresponse.info'))}catch{return false}}
-function clean(s:string){return s.replace(/<script[\\s\\S]*?<\\/script>/gi,' ').replace(/<style[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\\s+/g,' ').trim()}
-function attr(s:string,k:string){const m=s.match(new RegExp('\\\\b'+k+'=["\\\\\']([^"\\\\\']*)["\\\\\']','i'));return m?.[1]||''}
-function uidFrom(s:string){return s.match(/(?:#\\/forms\\/|\\/forms\\/)([A-Za-z0-9]+)(?:\\/|$)/)?.[1]||''}
-
-function parseXForm(xml:string):{title:string;fields:FormField[]}{
-  const title=clean(xml.match(/<(?:h:)?title[^>]*>([\\s\\S]*?)<\\/(?:h:)?title>/i)?.[1]||'KoboToolbox form');
-  const binds=new Map<string,AnyRecord>();
-  for(const m of xml.matchAll(/<(?:bind|xf:bind)\\b([^>]*)\\/?>(?:<\\/(?:bind|xf:bind)>)?/gi)){const ref=attr(m[1],'nodeset')||attr(m[1],'ref');if(ref)binds.set(ref,{type:attr(m[1],'type'),required:attr(m[1],'required'),relevant:attr(m[1],'relevant'),constraint:attr(m[1],'constraint'),calculation:attr(m[1],'calculate')||attr(m[1],'jr:calculate')})}
-  const fields:FormField[]=[];const seen=new Set<string>();
-  const add=(ref:string,fallback:string,body:string)=>{const name=ref.replace(/^\\//,'').replace(/^data\\//,'');if(!name||seen.has(name)||/^meta\\//i.test(name))return;const b=binds.get(ref)||binds.get('/'+name)||binds.get(name)||{};const label=clean(body.match(/<(?:h:)?label\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?label>/i)?.[1]||name.replace(/[_-]+/g,' '));const options:Array<{name:string;label:string}>=[];for(const item of body.matchAll(/<item\\b[^>]*>([\\s\\S]*?)<\\/item>/gi)){const value=item[1].match(/<(?:h:)?value\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?value>/i)?.[1];if(value)options.push({name:clean(value),label:clean(item[1].match(/<(?:h:)?label\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?label>/i)?.[1]||value)})}const type=b.type||fallback||'text';if(/calculate|note|hidden/i.test(type)||b.calculation)return;seen.add(name);fields.push({name,label,type,required:/true\\(\\)|true|1/i.test(b.required||''),...(b.relevant?{relevant:b.relevant}:{}),...(b.constraint?{constraint:b.constraint}:{}),...(options.length?{options}: {})})};
-  const control=/<(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)\\b([^>]*)(?:\\/>|>([\\s\\S]*?)<\\/(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)>)/gi;
-  for(const m of xml.matchAll(control)){const ref=attr(m[1]||'','ref');if(ref)add(ref,(m[0].match(/^<([a-z0-9:_-]+)/i)?.[1]||'input').replace(/^.*:/,''),m[2]||'')}
-  if(!fields.length)for(const [ref,b] of binds)if(b.type&&!/calculate|note|hidden/i.test(b.type))add(ref,b.type,'');
-  return {title,fields}
+function db() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!url || !key) throw new Error('Supabase is not configured');
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
-async function fetchText(url:string,headers:AnyRecord={}){const r=await fetch(url,{redirect:'follow',headers:{'User-Agent':'FieldMind-Research/5.0',Accept:'text/html,application/xml,text/xml,application/json',...headers}});return {r,text:await r.text()}}
-async function aiJson(system:string,prompt:string,name:string,schema:AnyRecord){const key=process.env.OPENAI_API_KEY;if(!key)return null;const r=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-5.6-luna',store:false,input:[{role:'system',content:[{type:'input_text',text:system}]},{role:'user',content:[{type:'input_text',text:prompt}]}],text:{format:{type:'json_schema',name,strict:true,schema}},max_output_tokens:8192})});if(!r.ok)throw new Error('AI request failed: '+r.status);const d=await r.json() as any;return d.output_text?JSON.parse(d.output_text):null}
 
-async function inspectKobo(url:string,source:string,token:string){
-  const uid=source||uidFrom(url);const auth=token||process.env.KOBO_API_TOKEN||'';const headers=auth?{Authorization:'Token '+auth}:{};
-  if(uid)for(const base of ['https://kf.kobotoolbox.org','https://eu.kobotoolbox.org'])for(const endpoint of ['/api/v2/assets/'+encodeURIComponent(uid)+'.xml','/api/v2/assets/'+encodeURIComponent(uid)+'/xform/']){try{const x=await fetchText(base+endpoint,headers);if(x.r.ok){const p=parseXForm(x.text);if(p.fields.length)return {...p,source:'Kobo API XForm',resolvedUrl:x.r.url}}}catch{}}
-  try{const x=await fetchText(url);if(x.r.ok){const p=parseXForm(x.text);if(p.fields.length)return {...p,source:'Kobo web form XForm',resolvedUrl:x.r.url};const extracted=await aiJson('Extract the exact questionnaire structure from the supplied KoboToolbox page text. Never invent questions, field names or choices.','PAGE TEXT:\\n'+clean(x.text).slice(0,45000),'kobo_form_definition',{type:'object',properties:{title:{type:'string'},fields:{type:'array',items:{type:'object',properties:{name:{type:'string'},label:{type:'string'},type:{type:'string'},required:{type:'boolean'},relevant:{type:'string'},options:{type:'array',items:{type:'object',properties:{name:{type:'string'},label:{type:'string'}},required:['name','label'],additionalProperties:false}}},required:['name','label','type','required','relevant','options'],additionalProperties:false}}},required:['title','fields'],additionalProperties:false});if(extracted?.fields?.length)return{title:extracted.title||'KoboToolbox form',fields:extracted.fields,source:'Kobo AI extraction',resolvedUrl:x.r.url}}}catch{}
-  return null
-}
-function synthetic(field:FormField,i:number,r:number){const prefix='SYNTHETIC_TEST_'+String(r+1).padStart(3,'0');if(field.options?.length)return field.options[(i+r)%field.options.length].name;if(/integer|decimal|range/i.test(field.type))return String((i%9)+1);if(/date/i.test(field.type))return '2099-01-'+String((r%28)+1).padStart(2,'0');if(/time/i.test(field.type))return '12:00:00';if(/geopoint/i.test(field.type))return '0 0 0 0';return prefix+'_'+field.name.toUpperCase().replace(/[^A-Z0-9]+/g,'_')}
-function chunks(n:number,size:number){const out:number[][]=[];for(let i=0;i<n;i+=size)out.push(Array.from({length:Math.min(size,n-i)},(_,j)=>i+j));return out}
-
-async function generate(project:AnyRecord,fields:FormField[],indexes:number[],ageMix:string,majority:string,sources:AnyRecord[]){
- const fieldText=fields.map((f,i)=>JSON.stringify({order:i+1,...f})).join('\n');
- return aiJson('Create SYNTHETIC QA fixtures for a KoboToolbox questionnaire. These are test fixtures, not participant records. Include every supplied field exactly once. Use only supplied choice values. Respect required, relevant and constraint information. For conditional fields that are not applicable, use __NOT_APPLICABLE_BY_FORM_LOGIC__. Free text must be explicitly synthetic. Never invent real identities or observed research facts.','PROJECT: '+String(project.name||'')+'\\nTOPIC: '+String(project.topic||'')+'\\nCONFIG: age mix='+ageMix+'; majority guidance='+majority+'\\nEVIDENCE LIBRARY (context only; do not fabricate citations):\\n'+sources.map((s:any)=>JSON.stringify({title:s.title,facility:s.facility,year:s.year,type:s.type,finding:s.finding})).join('\\n')+'\\nFORM DEFINITION:\\n'+fieldText+'\\nRECORD INDEXES: '+indexes.join(', '),'synthetic_qa_fixtures',{type:'object',properties:{drafts:{type:'array',items:{type:'object',properties:{label:{type:'string'},fields:{type:'array',items:{type:'object',properties:{name:{type:'string'},value:{type:'string'},confidence:{type:'number'},evidence:{type:'string'}},required:['name','value','confidence','evidence'],additionalProperties:false}}},required:['label','fields'],additionalProperties:false}}},required:['drafts'],additionalProperties:false})
+async function list<T>(collection: string, limit = 500) {
+  const { data, error } = await db()
+    .from(TABLE)
+    .select('id,record')
+    .eq('collection', collection)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).map((row: any) => ({ ...row.record, id: row.id })) as T[];
 }
 
-export default async function handler(req:any,res:any){
- try{
-  if(req.method==='OPTIONS'){res.status(204).end();return}
-  const path=new URL(req.url||'/', 'https://fieldmind.local').pathname.replace(/\\/$/,'')||'/';const body=bodyOf(req);
-  if(req.method==='GET'&&path==='/api/_healthcheck'){const configured=Boolean(process.env.SUPABASE_URL&&(process.env.SUPABASE_SECRET_KEY||process.env.SUPABASE_SERVICE_ROLE_KEY));send(res,200,{ok:true,database:configured?'configured':'missing',ai:process.env.OPENAI_API_KEY?'configured':'missing'});return}
-  if(req.method==='GET'&&path==='/api/projects'){send(res,200,{projects:await seed()});return}
-  if(req.method==='PUT'&&path.match(/^\\/api\\/projects\\/([^/]+)$/)){const id=path.match(/^\\/api\\/projects\\/([^/]+)$/)?.[1]||'';const ok=await update(id,{...body,id});send(res,ok?200:404,{project:{...body,id}});return}
-  if(req.method==='POST'&&path==='/api/projects'){if(!body.name||!body.location||!body.topic){send(res,400,{message:'Project name, location and topic are required'});return}const ids=await insert('projects',[body]);send(res,200,{project:{...body,id:ids[0]}});return}
-  if(req.method==='GET'&&path==='/api/drafts'){send(res,200,{drafts:await list<Draft>('drafts',500)});return}
-  if(req.method==='GET'&&path==='/api/sources'){const projectId=new URL(req.url||'https://fieldmind.local','https://fieldmind.local').searchParams.get('projectId')||'';const all=await list<AnyRecord>('sources',500);send(res,200,{sources:projectId?all.filter(s=>String(s.projectId||'')===projectId):all});return}
-  if(req.method==='POST'&&path==='/api/sources'){if(!body.projectId||!body.title||!body.finding){send(res,400,{message:'Project, title and finding are required'});return}const ids=await insert('sources',[{...body,id:undefined}]);send(res,200,{source:{...body,id:ids[0]}});return}
-  const sourceMatch=path.match(/^\\/api\\/sources\\/([^/]+)$/);
-  if(sourceMatch&&req.method==='PUT'){const id=sourceMatch[1];const ok=await update(id,{...body,id});send(res,ok?200:404,{source:{...body,id}});return}
-  if(sourceMatch&&req.method==='DELETE'){const ok=await remove(sourceMatch[1]);send(res,ok?200:404,{deleted:ok});return}
-  const match=path.match(/^\\/api\\/drafts\\/([^/]+)$/);
-  if(match&&req.method==='PUT'){const id=match[1];const ok=await update(id,{...body,id});send(res,ok?200:404,{draft:{...body,id}});return}
-  if(match&&req.method==='DELETE'){const ok=await remove(match[1]);send(res,ok?200:404,{deleted:ok});return}
-  if(req.method==='POST'&&path==='/api/kobo/inspect'){const url=String(body.url||'');if(!safeKobo(url)){send(res,400,{message:'Use a valid KoboToolbox HTTPS form URL'});return}const resolved=await inspectKobo(url,String(body.assetUid||''),String(body.apiToken||''));if(!resolved){send(res,422,{reachable:true,mapped:false,questionCount:0,fields:[],needsAssetUid:!body.assetUid,message:'Form page reached, but the questionnaire definition was not resolved. Paste the Kobo project URL or Asset UID for exact XForm mapping.'});return}send(res,200,{reachable:true,mapped:true,title:resolved.title,offlineReady:true,questionCount:resolved.fields.length,fields:resolved.fields,source:resolved.source,resolvedUrl:resolved.resolvedUrl});return}
-  if(req.method==='POST'&&path==='/api/ai/drafts'){const fields=(Array.isArray(body.fields)?body.fields:[]) as FormField[];if(!fields.length){send(res,400,{message:'Inspect the Kobo form first; no questionnaire definition is available'});return}const count=Math.max(1,Math.min(100,Number(body.count)||1));const project=(body.project||{}) as AnyRecord;const sources=Array.isArray(body.sources)?body.sources:[];const out:Draft[]=[];for(const batch of chunks(count,20)){let aiOut:any=null;try{aiOut=await generate(project,fields,batch,String(body.ageMix||''),String(body.majority||''),sources)}catch(e){console.error(e)}batch.forEach((recordIndex,offset)=>{const gen=aiOut?.drafts?.[offset];const map=new Map((gen?.fields||[]).map((f:any)=>[String(f.name||''),f]));out.push({projectId:String(project.id||''),label:String(gen?.label||'Synthetic QA fixture '+String(recordIndex+1).padStart(3,'0')),mode:'synthetic',fields:fields.map((f,i)=>{const c=map.get(f.name);return{name:f.name,label:f.label,value:String(c?.value||synthetic(f,i,recordIndex)),confidence:Math.max(0,Math.min(100,Number(c?.confidence)||100)),evidence:String(c?.evidence||'Synthetic QA value; not observed participant data.'),status:'review'}}),createdAt:new Date().toISOString(),status:'review'})})}const ids=await insert('drafts',out as any);send(res,200,{drafts:out.map((d,i)=>({...d,id:ids[i]})),mode:'synthetic',questionCount:fields.length});return}
-  if(req.method==='POST'&&path==='/api/drafts/confirm-all'){const pid=String(body.projectId||'');const items=(await list<Draft>('drafts',500)).filter(d=>d.projectId===pid);if(!pid||!items.length){send(res,400,{message:'No records found for this project'});return}if(items.some(d=>!d.fields.length||d.fields.some(f=>!f.name||!f.value))){send(res,400,{message:'Every mapped question needs a value or explicit form-logic skip marker'});return}await Promise.all(items.map(d=>update(String(d.id),{...d,status:'confirmed',fields:d.fields.map(f=>({...f,status:'approved'}))})));send(res,200,{confirmed:true,message:'Everything is confirmed. Controlled package preparation is unlocked.'});return}
-  if(req.method==='POST'&&path==='/api/drafts/export'){const pid=String(body.projectId||'');const items=(await list<Draft>('drafts',500)).filter(d=>d.projectId===pid);if(!items.length){send(res,400,{message:'No records found for this project'});return}if(items.some(d=>d.status!=='confirmed'&&d.status!=='deployed')){send(res,409,{message:'Export locked until every record is confirmed'});return}send(res,200,{filename:'fieldmind-reviewed-synthetic-qa.csv',csv:toCsv(items),recordCount:items.length});return}
-  if(req.method==='POST'&&path==='/api/drafts/deploy'){const pid=String(body.projectId||'');const items=(await list<Draft>('drafts',500)).filter(d=>d.projectId===pid);if(!items.length){send(res,400,{message:'No records found for this project'});return}if(items.some(d=>d.status!=='confirmed'&&d.status!=='deployed')){send(res,409,{message:'Deployment locked until every record is confirmed'});return}await Promise.all(items.map(d=>update(String(d.id),{...d,status:'deployed'})));send(res,200,{deployed:true,packagePrepared:true,message:'Controlled synthetic QA package prepared. No live Kobo submission was performed.'});return}
-  send(res,404,{message:'Route not found'})
- }catch(e){console.error('FieldMind API error',e);send(res,500,{message:e instanceof Error?e.message:'Internal server error'})}
+async function insert(collection: string, records: AnyRecord[]) {
+  const { data, error } = await db()
+    .from(TABLE)
+    .insert(records.map(record => ({ collection, record })))
+    .select('id');
+  if (error) throw error;
+  return (data || []).map((row: any) => row.id);
+}
+
+async function update(id: string, record: AnyRecord) {
+  const { data, error } = await db()
+    .from(TABLE)
+    .update({ record, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  return Boolean(data?.length);
+}
+
+async function remove(id: string) {
+  const { data, error } = await db().from(TABLE).delete().eq('id', id).select('id');
+  if (error) throw error;
+  return Boolean(data?.length);
+}
+
+async function seed() {
+  const projects = await list<AnyRecord>('projects', 10);
+  if (projects.length) return projects;
+  const ids = await insert('projects', [defaultProject]);
+  return [{ ...defaultProject, id: ids[0] }];
+}
+
+function send(res: any, status: number, payload: any) {
+  res
+    .status(status)
+    .setHeader('Content-Type', 'application/json; charset=utf-8')
+    .json(payload);
+}
+
+function bodyOf(req: any): AnyRecord {
+  if (!req.body) return {};
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return req.body;
+}
+
+function clean(value: string) {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function attr(source: string, key: string) {
+  const match = source.match(new RegExp('\\b' + key + '=["\\\']([^"\\\']*)["\\\']', 'i'));
+  return match?.[1] || '';
+}
+
+function safeKoboUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      (url.hostname.endsWith('kobotoolbox.org') ||
+        url.hostname.endsWith('humanitarianresponse.info'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function uidFrom(value: string) {
+  const urlMatch = value.match(/(?:\/x\/|\/forms\/|\/assets\/)([A-Za-z0-9_-]+)/);
+  if (urlMatch?.[1]) return urlMatch[1];
+  return /^[A-Za-z0-9_-]+$/.test(value.trim()) ? value.trim() : '';
+}
+
+function parseXForm(xml: string): { title: string; fields: FormField[] } {
+  const title =
+    clean(
+      xml.match(/<(?:h:)?title[^>]*>([\s\S]*?)<\/(?:h:)?title>/i)?.[1] || ''
+    ) || 'KoboToolbox form';
+
+  const binds = new Map<string, AnyRecord>();
+
+  for (const match of xml.matchAll(
+    /<(?:bind|xf:bind)\b([^>]*)\/?>(?:<\/(?:bind|xf:bind)>)?/gi
+  )) {
+    const raw = match[1] || '';
+    const ref = attr(raw, 'nodeset') || attr(raw, 'ref');
+    if (!ref) continue;
+    binds.set(ref, {
+      type: attr(raw, 'type'),
+      required: attr(raw, 'required'),
+      relevant: attr(raw, 'relevant'),
+      constraint: attr(raw, 'constraint'),
+      calculation: attr(raw, 'calculate') || attr(raw, 'jr:calculate'),
+    });
+  }
+
+  const fields: FormField[] = [];
+  const seen = new Set<string>();
+
+  const addField = (ref: string, fallbackType: string, body: string) => {
+    const name = ref.replace(/^\//, '').replace(/^data\//, '');
+    if (!name || seen.has(name) || /^meta\//i.test(name)) return;
+
+    const binding = binds.get(ref) || binds.get('/' + name) || binds.get(name) || {};
+    const label =
+      clean(
+        body.match(/<(?:h:)?label\b[^>]*>([\s\S]*?)<\/(?:h:)?label>/i)?.[1] || ''
+      ) || name.replace(/[_-]+/g, ' ');
+
+    const options: FormOption[] = [];
+    for (const item of body.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+      const itemBody = item[1] || '';
+      const value = itemBody.match(
+        /<(?:h:)?value\b[^>]*>([\s\S]*?)<\/(?:h:)?value>/i
+      )?.[1];
+      if (!value) continue;
+      const optionLabel =
+        itemBody.match(
+          /<(?:h:)?label\b[^>]*>([\s\S]*?)<\/(?:h:)?label>/i
+        )?.[1] || value;
+      options.push({ name: clean(value), label: clean(optionLabel) });
+    }
+
+    const type = binding.type || fallbackType || 'text';
+    if (/calculate|note|hidden/i.test(type) || binding.calculation) return;
+
+    seen.add(name);
+    fields.push({
+      name,
+      label,
+      type,
+      required: /true\(\)|true|1/i.test(binding.required || ''),
+      ...(binding.relevant ? { relevant: binding.relevant } : {}),
+      ...(binding.constraint ? { constraint: binding.constraint } : {}),
+      ...(options.length ? { options } : {}),
+    });
+  };
+
+  const control = /<(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)\b([^>]*)(?:\/>|>([\s\S]*?)<\/(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)>)/gi;
+
+  for (const match of xml.matchAll(control)) {
+    const raw = match[0];
+    const attributes = match[1] || '';
+    const body = match[2] || '';
+    const ref = attr(attributes, 'ref');
+    const fallback = raw.match(/^<([a-z0-9:_-]+)/i)?.[1]?.replace(/^.*:/, '') || 'input';
+    if (ref) addField(ref, fallback, body);
+  }
+
+  if (!fields.length) {
+    for (const [ref, binding] of binds) {
+      if (binding.type && !/calculate|note|hidden/i.test(binding.type)) {
+        addField(ref, binding.type, '');
+      }
+    }
+  }
+
+  return { title, fields };
+}
+
+async function fetchText(url: string, headers: AnyRecord = {}) {
+  const response = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent': 'FieldMind-Research/6.0',
+      Accept: 'text/html,application/xml,text/xml,application/json',
+      ...headers,
+    },
+  });
+  return { response, text: await response.text() };
+}
+
+async function aiJson(
+  system: string,
+  prompt: string,
+  name: string,
+  schema: AnyRecord
+) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + key,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
+      store: false,
+      input: [
+        { role: 'system', content: [{ type: 'input_text', text: system }] },
+        { role: 'user', content: [{ type: 'input_text', text: prompt }] },
+      ],
+      text: {
+        format: { type: 'json_schema', name, strict: true, schema },
+      },
+      max_output_tokens: 8192,
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error('AI request failed (' + response.status + ')' + (detail ? ': ' + detail.slice(0, 300) : ''));
+  }
+
+  const data = (await response.json()) as any;
+  if (!data.output_text) throw new Error('AI returned no structured output.');
+  return JSON.parse(data.output_text);
+}
+
+async function inspectKobo(url: string, source: string, token: string) {
+  const uid = uidFrom(source) || uidFrom(url);
+  const auth = token || process.env.KOBO_API_TOKEN || '';
+  const headers = auth ? { Authorization: 'Token ' + auth } : {};
+
+  if (uid) {
+    for (const base of ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org']) {
+      for (const endpoint of [
+        '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
+        '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
+      ]) {
+        try {
+          const result = await fetchText(base + endpoint, headers);
+          if (!result.response.ok) continue;
+          const parsed = parseXForm(result.text);
+          if (parsed.fields.length) {
+            return {
+              ...parsed,
+              source: 'Kobo API XForm',
+              resolvedUrl: result.response.url,
+            };
+          }
+        } catch {}
+      }
+    }
+  }
+
+  try {
+    const result = await fetchText(url);
+    if (!result.response.ok) {
+      throw new Error('Kobo returned HTTP ' + result.response.status);
+    }
+
+    const parsed = parseXForm(result.text);
+    if (parsed.fields.length) {
+      return {
+        ...parsed,
+        source: 'Kobo web form XForm',
+        resolvedUrl: result.response.url,
+      };
+    }
+
+    const extracted = await aiJson(
+      'Extract the exact questionnaire structure from the supplied KoboToolbox page text. Never invent questions, field names or choices. If the page does not expose a question, omit it.',
+      'PAGE TEXT:\n' + clean(result.text).slice(0, 45000),
+      'kobo_form_definition',
+      {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          fields: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                label: { type: 'string' },
+                type: { type: 'string' },
+                required: { type: 'boolean' },
+                relevant: { type: 'string' },
+                options: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      label: { type: 'string' },
+                    },
+                    required: ['name', 'label'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['name', 'label', 'type', 'required', 'relevant', 'options'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['title', 'fields'],
+        additionalProperties: false,
+      }
+    );
+
+    if (extracted?.fields?.length) {
+      return {
+        title: extracted.title || 'KoboToolbox form',
+        fields: extracted.fields,
+        source: 'Kobo AI extraction',
+        resolvedUrl: result.response.url,
+      };
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Kobo returned')) {
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+function syntheticValue(field: FormField, index: number, recordIndex: number) {
+  const prefix = 'SYNTHETIC_TEST_' + String(recordIndex + 1).padStart(3, '0');
+  if (field.options?.length) return field.options[(index + recordIndex) % field.options.length].name;
+  if (/integer|decimal|range/i.test(field.type)) return String((index % 9) + 1);
+  if (/date/i.test(field.type)) return '2099-01-' + String((recordIndex % 28) + 1).padStart(2, '0');
+  if (/time/i.test(field.type)) return '12:00:00';
+  if (/geopoint/i.test(field.type)) return '0 0 0 0';
+  return prefix + '_' + field.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function chunks(count: number, size: number) {
+  const output: number[][] = [];
+  for (let i = 0; i < count; i += size) {
+    output.push(Array.from({ length: Math.min(size, count - i) }, (_, j) => i + j));
+  }
+  return output;
+}
+
+async function generate(
+  project: AnyRecord,
+  fields: FormField[],
+  indexes: number[],
+  ageMix: string,
+  majority: string,
+  sources: AnyRecord[]
+) {
+  const fieldText = fields.map((field, i) => JSON.stringify({ order: i + 1, ...field })).join('\n');
+  const sourceText = sources
+    .map(source =>
+      JSON.stringify({
+        title: source.title,
+        facility: source.facility,
+        year: source.year,
+        type: source.type,
+        finding: source.finding,
+      })
+    )
+    .join('\n');
+
+  return aiJson(
+    'Create SYNTHETIC QA fixtures for a KoboToolbox questionnaire. These are test fixtures, not participant records. Include every supplied field exactly once. Use only supplied choice values. Respect required, relevant and constraint information. For conditional fields that are not applicable, use __NOT_APPLICABLE_BY_FORM_LOGIC__. Free text must be explicitly synthetic. Never invent real identities, observed participant facts, citations or statistics.',
+    'PROJECT: ' + String(project.name || '') +
+      '\nTOPIC: ' + String(project.topic || '') +
+      '\nCONFIG: age mix=' + ageMix + '; majority guidance=' + majority +
+      '\nEVIDENCE LIBRARY (context only; do not fabricate citations):\n' + sourceText +
+      '\nFORM DEFINITION:\n' + fieldText +
+      '\nRECORD INDEXES: ' + indexes.join(', '),
+    'synthetic_qa_fixtures',
+    {
+      type: 'object',
+      properties: {
+        drafts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              fields: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    value: { type: 'string' },
+                    confidence: { type: 'number' },
+                    evidence: { type: 'string' },
+                  },
+                  required: ['name', 'value', 'confidence', 'evidence'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['label', 'fields'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['drafts'],
+      additionalProperties: false,
+    }
+  );
+}
+
+function csvCell(value: any) {
+  return '"' + String(value ?? '').replace(/"/g, '""') + '"';
+}
+
+function toCsv(items: Draft[]) {
+  if (!items.length) return '';
+  const names = Array.from(new Set(items.flatMap(draft => draft.fields.map(field => field.name))));
+  const header = ['record_id', 'label', 'status', ...names];
+  const rows = items.map(draft => [
+    draft.id,
+    draft.label,
+    draft.status || 'review',
+    ...names.map(name => draft.fields.find(field => field.name === name)?.value ?? ''),
+  ]);
+  return [header, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
+}
+
+export default async function handler(req: any, res: any) {
+  try {
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+
+    const path = new URL(req.url || '/', 'https://fieldmind.local').pathname.replace(/\/$/, '') || '/';
+    const body = bodyOf(req);
+
+    if (req.method === 'GET' && path === '/api/_healthcheck') {
+      const database = Boolean(
+        process.env.SUPABASE_URL &&
+        (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
+      );
+      const ai = Boolean(process.env.OPENAI_API_KEY);
+      send(res, 200, { ok: database && ai, database: database ? 'configured' : 'missing', ai: ai ? 'configured' : 'missing' });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/api/projects') {
+      send(res, 200, { projects: await seed() });
+      return;
+    }
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+    if (projectMatch && req.method === 'PUT') {
+      const id = projectMatch[1];
+      const ok = await update(id, { ...body, id });
+      send(res, ok ? 200 : 404, { project: { ...body, id } });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/projects') {
+      if (!body.name || !body.location || !body.topic) {
+        send(res, 400, { message: 'Project name, location and topic are required' });
+        return;
+      }
+      const ids = await insert('projects', [body]);
+      send(res, 200, { project: { ...body, id: ids[0] } });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/api/drafts') {
+      send(res, 200, { drafts: await list<Draft>('drafts', 500) });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/api/sources') {
+      const projectId = new URL(req.url || '/', 'https://fieldmind.local').searchParams.get('projectId') || '';
+      const all = await list<AnyRecord>('sources', 500);
+      send(res, 200, { sources: projectId ? all.filter(source => String(source.projectId || '') === projectId) : all });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/sources') {
+      if (!body.projectId || !body.title || !body.finding) {
+        send(res, 400, { message: 'Project, title and finding are required' });
+        return;
+      }
+      const ids = await insert('sources', [body]);
+      send(res, 200, { source: { ...body, id: ids[0] } });
+      return;
+    }
+
+    const sourceMatch = path.match(/^\/api\/sources\/([^/]+)$/);
+    if (sourceMatch && req.method === 'PUT') {
+      const id = sourceMatch[1];
+      const ok = await update(id, { ...body, id });
+      send(res, ok ? 200 : 404, { source: { ...body, id } });
+      return;
+    }
+
+    if (sourceMatch && req.method === 'DELETE') {
+      const ok = await remove(sourceMatch[1]);
+      send(res, ok ? 200 : 404, { deleted: ok });
+      return;
+    }
+
+    const draftMatch = path.match(/^\/api\/drafts\/([^/]+)$/);
+    if (draftMatch && req.method === 'PUT') {
+      const id = draftMatch[1];
+      const ok = await update(id, { ...body, id });
+      send(res, ok ? 200 : 404, { draft: { ...body, id } });
+      return;
+    }
+
+    if (draftMatch && req.method === 'DELETE') {
+      const ok = await remove(draftMatch[1]);
+      send(res, ok ? 200 : 404, { deleted: ok });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/kobo/inspect') {
+      const url = String(body.url || '');
+      if (!safeKoboUrl(url)) {
+        send(res, 400, { message: 'Use a valid KoboToolbox HTTPS form URL' });
+        return;
+      }
+      const resolved = await inspectKobo(url, String(body.assetUid || ''), String(body.apiToken || ''));
+      if (!resolved) {
+        send(res, 422, {
+          reachable: true,
+          mapped: false,
+          questionCount: 0,
+          fields: [],
+          needsAssetUid: !body.assetUid,
+          message: 'The Kobo page is reachable, but its questionnaire definition was not resolved. Paste the Kobo project URL or Asset UID for exact XForm mapping.',
+        });
+        return;
+      }
+      send(res, 200, {
+        reachable: true,
+        mapped: true,
+        title: resolved.title,
+        offlineReady: true,
+        questionCount: resolved.fields.length,
+        fields: resolved.fields,
+        source: resolved.source,
+        resolvedUrl: resolved.resolvedUrl,
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/ai/drafts') {
+      const fields = (Array.isArray(body.fields) ? body.fields : []) as FormField[];
+      if (!fields.length) {
+        send(res, 400, { message: 'Inspect the Kobo form first; no questionnaire definition is available' });
+        return;
+      }
+
+      const count = Math.max(1, Math.min(100, Number(body.count) || 1));
+      const project = (body.project || {}) as AnyRecord;
+      const sources = Array.isArray(body.sources) ? body.sources : [];
+      const output: Draft[] = [];
+
+      for (const batch of chunks(count, 20)) {
+        let aiOutput: any = null;
+        try {
+          aiOutput = await generate(
+            project,
+            fields,
+            batch,
+            String(body.ageMix || ''),
+            String(body.majority || ''),
+            sources
+          );
+        } catch (error) {
+          console.error('Synthetic generation AI error', error);
+        }
+
+        batch.forEach((recordIndex, offset) => {
+          const generated = aiOutput?.drafts?.[offset];
+          const map = new Map(
+            (generated?.fields || []).map((field: any) => [String(field.name || ''), field])
+          );
+
+          output.push({
+            projectId: String(project.id || ''),
+            label:
+              String(generated?.label || '') ||
+              'Synthetic QA fixture ' + String(recordIndex + 1).padStart(3, '0'),
+            mode: 'synthetic',
+            fields: fields.map((field, index) => {
+              const candidate = map.get(field.name);
+              return {
+                name: field.name,
+                label: field.label,
+                value: String(candidate?.value || syntheticValue(field, index, recordIndex)),
+                confidence: Math.max(0, Math.min(100, Number(candidate?.confidence) || 100)),
+                evidence: String(candidate?.evidence || 'Synthetic QA value; not observed participant data.'),
+                status: 'review',
+              };
+            }),
+            createdAt: new Date().toISOString(),
+            status: 'review',
+          });
+        });
+      }
+
+      const ids = await insert('drafts', output as AnyRecord[]);
+      send(res, 200, {
+        drafts: output.map((draft, index) => ({ ...draft, id: ids[index] })),
+        mode: 'synthetic',
+        questionCount: fields.length,
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/drafts/confirm-all') {
+      const projectId = String(body.projectId || '');
+      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+
+      if (!projectId || !items.length) {
+        send(res, 400, { message: 'No records found for this project' });
+        return;
+      }
+
+      if (
+        items.some(
+          draft =>
+            !draft.fields.length ||
+            draft.fields.some(field => !field.name || !field.value)
+        )
+      ) {
+        send(res, 400, { message: 'Every mapped question needs a value or explicit form-logic skip marker' });
+        return;
+      }
+
+      await Promise.all(
+        items.map(draft =>
+          update(String(draft.id), {
+            ...draft,
+            status: 'confirmed',
+            fields: draft.fields.map(field => ({ ...field, status: 'approved' })),
+          })
+        )
+      );
+
+      send(res, 200, {
+        confirmed: true,
+        message: 'Everything is confirmed. Controlled package preparation is unlocked.',
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/drafts/export') {
+      const projectId = String(body.projectId || '');
+      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+
+      if (!items.length) {
+        send(res, 400, { message: 'No records found for this project' });
+        return;
+      }
+
+      if (items.some(draft => draft.status !== 'confirmed' && draft.status !== 'deployed')) {
+        send(res, 409, { message: 'Export locked until every record is confirmed' });
+        return;
+      }
+
+      send(res, {
+        statusCode: 200,
+      } as any, {
+        filename: 'fieldmind-reviewed-synthetic-qa.csv',
+        csv: toCsv(items),
+        recordCount: items.length,
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/drafts/deploy') {
+      const projectId = String(body.projectId || '');
+      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+
+      if (!items.length) {
+        send(res, 400, { message: 'No records found for this project' });
+        return;
+      }
+
+      if (items.some(draft => draft.status !== 'confirmed' && draft.status !== 'deployed')) {
+        send(res, 409, { message: 'Package preparation locked until every record is confirmed' });
+        return;
+      }
+
+      await Promise.all(
+        items.map(draft => update(String(draft.id), { ...draft, status: 'deployed' }))
+      );
+
+      send(res, 200, {
+        deployed: true,
+        packagePrepared: true,
+        message: 'Controlled synthetic QA package prepared. No live Kobo submission was performed.',
+      });
+      return;
+    }
+
+    send(res, 404, { message: 'Route not found' });
+  } catch (error) {
+    console.error('FieldMind API error', error);
+    send(res, 500, {
+      message: error instanceof Error ? error.message : 'Internal server error',
+    });
+  }
 }
