@@ -1311,3 +1311,12 @@ label textarea:focus {
 .review-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#f0f6ec;border:1px solid #dce7d5;border-radius:14px;padding:14px 16px;margin-bottom:13px}.review-banner strong{display:block;font-size:11px;color:#405632}.review-banner p{margin:4px 0 0;font-size:9px;color:#73816b}.review-card-actions{display:flex;align-items:center;gap:7px}.icon-small{border:1px solid #dfe5df;background:#fff;color:#68746d;padding:7px 9px;border-radius:8px;font-size:8px}.icon-small.danger{color:#9a6969}@media(max-width:620px){.review-banner{align-items:flex-start;flex-direction:column}}
 
 .kobo-source{display:grid;gap:7px;margin-top:12px}.kobo-source .field-label span{font-weight:500;color:#8a948e}.kobo-source input{width:100%;border:1px solid #dde3dd;background:#fff;border-radius:10px;padding:10px 11px;font-size:12px;color:#26322b;outline:none}
+
+
+.system-banner{margin:0 22px;padding:10px 13px;border:1px solid #e1e6e1;background:#f7f9f6;border-radius:10px;color:#68746d;font-size:10px;display:flex;align-items:center;gap:8px}
+.system-banner.error{border-color:#ead7d7;background:#fff7f7;color:#8b6262}
+.system-banner.checking{border-color:#dce4dc}
+button:disabled{opacity:.52;cursor:not-allowed}
+.setting-input{width:180px;max-width:45%;border:1px solid #dfe5df;background:#fff;border-radius:9px;padding:8px 9px;font-size:9px;color:#334139;outline:none}
+.source-link.danger{margin-left:6px;color:#9a6969}
+@media(max-width:620px){.system-banner{margin:0 13px}.setting-input{width:100%;max-width:none}}
