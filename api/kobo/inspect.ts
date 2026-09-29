@@ -12,8 +12,8 @@ type FormField = {
 
 function clean(value: string) {
   return value
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -21,17 +21,17 @@ function clean(value: string) {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/\\s+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 function attr(source: string, key: string) {
-  const match = source.match(new RegExp('\\\\b' + key + '=["\\\\\\']([^"\\\\\\']*)["\\\\\\']', 'i'));
+  const match = source.match(new RegExp('\\b' + key + '=["\\']([^"\\']*)["\\']', 'i'));
   return match?.[1] || '';
 }
 
 function uidFrom(value: string) {
-  const match = value.match(/(?:\\/x\\/|\\/forms\\/|\\/assets\\/)([A-Za-z0-9_-]+)/);
+  const match = value.match(/(?:\/x\/|\/forms\/|\/assets\/)([A-Za-z0-9_-]+)/);
   if (match?.[1]) return match[1];
   return /^[A-Za-z0-9_-]+$/.test(value.trim()) ? value.trim() : '';
 }
@@ -47,10 +47,10 @@ function safeKoboUrl(value: string) {
 }
 
 function parseXForm(xml: string): { title: string; fields: FormField[] } {
-  const title = clean(xml.match(/<(?:h:)?title[^>]*>([\\s\\S]*?)<\\/(?:h:)?title>/i)?.[1] || '') || 'KoboToolbox form';
+  const title = clean(xml.match(/<(?:h:)?title[^>]*>([\s\S]*?)<\/(?:h:)?title>/i)?.[1] || '') || 'KoboToolbox form';
   const binds = new Map<string, AnyRecord>();
 
-  for (const match of xml.matchAll(/<(?:bind|xf:bind)\\b([^>]*)\\/?>(?:<\\/(?:bind|xf:bind)>)?/gi)) {
+  for (const match of xml.matchAll(/<(?:bind|xf:bind)\b([^>]*)\/?>(?:<\/(?:bind|xf:bind)>)?/gi)) {
     const raw = match[1] || '';
     const ref = attr(raw, 'nodeset') || attr(raw, 'ref');
     if (!ref) continue;
@@ -67,18 +67,18 @@ function parseXForm(xml: string): { title: string; fields: FormField[] } {
   const seen = new Set<string>();
 
   const addField = (ref: string, fallbackType: string, body: string) => {
-    const name = ref.replace(/^\\//, '').replace(/^data\\//, '');
-    if (!name || seen.has(name) || /^meta\\//i.test(name)) return;
+    const name = ref.replace(/^\//, '').replace(/^data\//, '');
+    if (!name || seen.has(name) || /^meta\//i.test(name)) return;
     const binding = binds.get(ref) || binds.get('/' + name) || binds.get(name) || {};
-    const label = clean(body.match(/<(?:h:)?label\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?label>/i)?.[1] || '') ||
+    const label = clean(body.match(/<(?:h:)?label\b[^>]*>([\s\S]*?)<\/(?:h:)?label>/i)?.[1] || '') ||
       name.replace(/[_-]+/g, ' ');
 
     const options: FormOption[] = [];
-    for (const item of body.matchAll(/<item\\b[^>]*>([\\s\\S]*?)<\\/item>/gi)) {
+    for (const item of body.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
       const itemBody = item[1] || '';
-      const value = itemBody.match(/<(?:h:)?value\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?value>/i)?.[1];
+      const value = itemBody.match(/<(?:h:)?value\b[^>]*>([\s\S]*?)<\/(?:h:)?value>/i)?.[1];
       if (!value) continue;
-      const optionLabel = itemBody.match(/<(?:h:)?label\\b[^>]*>([\\s\\S]*?)<\\/(?:h:)?label>/i)?.[1] || value;
+      const optionLabel = itemBody.match(/<(?:h:)?label\b[^>]*>([\s\S]*?)<\/(?:h:)?label>/i)?.[1] || value;
       options.push({ name: clean(value), label: clean(optionLabel) });
     }
 
@@ -89,14 +89,14 @@ function parseXForm(xml: string): { title: string; fields: FormField[] } {
       name,
       label,
       type,
-      required: /true\\(\\)|true|1/i.test(binding.required || ''),
+      required: /true\(\)|true|1/i.test(binding.required || ''),
       ...(binding.relevant ? { relevant: binding.relevant } : {}),
       ...(binding.constraint ? { constraint: binding.constraint } : {}),
       ...(options.length ? { options } : {}),
     });
   };
 
-  const control = /<(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)\\b([^>]*)(?:\\/>|>([\\s\\S]*?)<\\/(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)>)/gi;
+  const control = /<(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)\b([^>]*)(?:\/>|>([\s\S]*?)<\/(?:input|select1|select|textarea|upload|range|geopoint|date|datetime|time)>)/gi;
   for (const match of xml.matchAll(control)) {
     const raw = match[0];
     const attributes = match[1] || '';
