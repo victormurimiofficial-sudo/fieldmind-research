@@ -650,19 +650,14 @@ export default async function handler(req: any, res: any) {
       const output: Draft[] = [];
 
       for (const batch of chunks(count, 20)) {
-        let aiOutput: any = null;
-        try {
-          aiOutput = await generate(
-            project,
-            fields,
-            batch,
-            String(body.ageMix || ''),
-            String(body.majority || ''),
-            sources
-          );
-        } catch (error) {
-          console.error('Synthetic generation AI error', error);
-        }
+        const aiOutput = await generate(
+          project,
+          fields,
+          batch,
+          String(body.ageMix || ''),
+          String(body.majority || ''),
+          sources
+        );
 
         batch.forEach((recordIndex, offset) => {
           const generated = aiOutput?.drafts?.[offset];
@@ -715,10 +710,11 @@ export default async function handler(req: any, res: any) {
         items.some(
           draft =>
             !draft.fields.length ||
-            draft.fields.some(field => !field.name || !field.value)
+            draft.fields.some(field => !field.name || !field.value) ||
+            draft.fields.some(field => field.status === 'rejected')
         )
       ) {
-        send(res, 400, { message: 'Every mapped question needs a value or explicit form-logic skip marker' });
+        send(res, 400, { message: 'Resolve rejected or incomplete fields before final confirmation.' });
         return;
       }
 
