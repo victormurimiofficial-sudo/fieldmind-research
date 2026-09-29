@@ -90,10 +90,30 @@ async function remove(id: string) {
 }
 
 async function seed() {
+  // Never create a project from application code. Projects must come from the workspace owner.
+  // Remove the legacy demo project only when it is still completely untouched.
   const projects = await list<AnyRecord>('projects', 100);
-  if (projects.length) return projects;
-  const ids = await insert('projects', [defaultProject]);
-  return [{ ...defaultProject, id: ids[0] }];
+  if (!projects.length) return [];
+  const legacy = projects.filter(
+    project =>
+      project.name === defaultProject.name &&
+      project.location === defaultProject.location &&
+      project.koboUrl === defaultProject.koboUrl
+  );
+  if (legacy.length === projects.length) {
+    const [drafts, sources] = await Promise.all([
+      list<Draft>('drafts', 1000),
+      list<AnyRecord>('sources', 1000),
+    ]);
+    const legacyIds = new Set(legacy.map(project => String(project.id)));
+    const touched = drafts.some(draft => legacyIds.has(String(draft.projectId))) ||
+      sources.some(source => legacyIds.has(String(source.projectId)));
+    if (!touched) {
+      await Promise.all(legacy.map(project => remove(String(project.id))));
+      return [];
+    }
+  }
+  return projects;
 }
 
 async function projectsWithStats() {
@@ -620,7 +640,7 @@ export default async function handler(req: any, res: any) {
           questionCount: 0,
           fields: [],
           needsAssetUid: !body.assetUid,
-          message: 'The Kobo page is reachable, but its questionnaire definition was not resolved. Paste the Kobo project URL or Asset UID for exact XForm mapping.',
+          message: 'Kobo was reached, but FieldMind could not resolve the questionnaire definition. For exact mapping, paste the Kobo project URL or Asset UID. If this is a public /x/ link, keep the link and we will use its resolved XForm when Kobo exposes it.',
         });
         return;
       }
