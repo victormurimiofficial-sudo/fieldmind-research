@@ -82,50 +82,19 @@ type Draft = {
   status?: 'review' | 'confirmed' | 'deployed';
 };
 
-const sampleProject: Project = {
-  id: 'demo-thika',
-  name: 'Thika Level 5 NCD Community Study',
-  location: 'Thika Level 5 Hospital, Kiambu County',
-  topic:
-    'Health-seeking behavior for non-communicable diseases among adult men',
-  koboUrl: 'https://ee.kobotoolbox.org/x/IowlqBLK',
-  formStatus: 'Connected',
-  offlineReady: true,
-  researchCount: 6,
-  draftCount: 12,
+const emptyProject: Project = {
+  id: '',
+  name: 'No project selected',
+  location: '',
+  topic: '',
+  koboUrl: '',
+  formStatus: 'Not connected',
+  offlineReady: false,
+  researchCount: 0,
+  draftCount: 0,
   approvedCount: 0,
-  updatedAt: 'Today',
+  updatedAt: '',
 };
-
-const sampleSources: Source[] = [
-  {
-    id: 's1',
-    title: 'NCD care-seeking patterns in Kiambu',
-    facility: 'Kiambu County',
-    year: 2024,
-    type: 'Local study',
-    finding:
-      'Reports barriers around cost, waiting time and perceived severity.',
-  },
-  {
-    id: 's2',
-    title: 'Male health-seeking behaviour review',
-    facility: 'Kenya',
-    year: 2023,
-    type: 'Literature',
-    finding:
-      'Men may delay formal care when symptoms are perceived as manageable.',
-  },
-  {
-    id: 's3',
-    title: 'Thika outpatient service assessment',
-    facility: 'Thika Level 5',
-    year: 2022,
-    type: 'Facility evidence',
-    finding:
-      'Outpatient service use varies by perceived urgency and access constraints.',
-  },
-];
 
 const nav = [
   { key: 'overview', label: 'Overview', icon: Activity },
@@ -138,16 +107,17 @@ const nav = [
 function App() {
   const [page, setPage] = useState('overview');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([sampleProject]);
-  const [sources, setSources] = useState<Source[]>(sampleSources);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sources, setSources] = useState<Source[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project>(sampleProject);
+  const [selectedProject, setSelectedProject] = useState<Project>(emptyProject);
   const [fields, setFields] = useState<FormField[]>([]);
-  const [koboUrl, setKoboUrl] = useState(sampleProject.koboUrl);
+  const [koboUrl, setKoboUrl] = useState('');
   const [koboSource, setKoboSource] = useState('');
   const [koboToken, setKoboToken] = useState('');
   const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
   const [draftCount, setDraftCount] = useState(12);
+  const [backendState, setBackendState] = useState<'checking'|'ready'|'error'>('checking');
   const [ageMix, setAgeMix] = useState('18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
   const [majority, setMajority] = useState('No directional tendency');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -166,22 +136,38 @@ function App() {
   const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
 
   useEffect(() => {
-    api
-      .get('/api/projects')
-      .then(r => {
-        if (Array.isArray(r.data?.projects) && r.data.projects.length) {
-          setProjects(r.data.projects);
-          setSelectedProject(r.data.projects[0]);
+    let alive = true;
+    const boot = async () => {
+      try {
+        const health = await api.get('/api/_healthcheck');
+        if (!health.data?.ok || health.data?.database !== 'configured' || health.data?.ai !== 'configured') {
+          throw new Error('Backend configuration is incomplete.');
         }
-      })
-      .catch(() => {});
-    api
-      .get('/api/drafts')
-      .then(r => {
-        if (Array.isArray(r.data?.drafts)) setDrafts(r.data.drafts);
-      })
-      .catch(() => {});
-  }, []);
+        const [projectResult, draftResult] = await Promise.all([api.get('/api/projects'), api.get('/api/drafts')]);
+        if (!alive) return;
+        const loadedProjects = Array.isArray(projectResult.data?.projects) ? projectResult.data.projects : [];
+        setProjects(loadedProjects);
+        setDrafts(Array.isArray(draftResult.data?.drafts) ? draftResult.data.drafts : []);
+        const first = loadedProjects[0];
+        if (first) {
+          setSelectedProject(first);
+          setKoboUrl(first.koboUrl || '');
+          const sourceResult = await api.get('/api/sources?projectId=' + encodeURIComponent(first.id));
+          if (alive) setSources(Array.isArray(sourceResult.data?.sources) ? sourceResult.data.sources : []);
+        } else {
+          setSelectedProject(emptyProject);
+          setSources([]);
+        }
+        setBackendState('ready');
+      } catch (e) {
+        if (!alive) return;
+        setBackendState('error');
+        setToast(e instanceof Error ? e.message : 'Backend connection failed.');
+      }
+    };
+    boot();
+    return () => { alive = false; };
+  }, []););
 
   useEffect(() => {
     if (!toast) return;
@@ -196,6 +182,12 @@ function App() {
       const mapped = Array.isArray(result.data?.fields) ? result.data.fields : [];
       setFields(mapped);
       setKoboState({ checked: true, offline: Boolean(result.data?.offlineReady), title: result.data?.title || 'Kobo form', questionCount: mapped.length, error: '' });
+      if (selectedProject.id) {
+        const updatedProject = { ...selectedProject, koboUrl, formStatus: mapped.length ? 'Connected' : 'Needs inspection', offlineReady: Boolean(result.data?.offlineReady), updatedAt: 'Just now' };
+        await api.put('/api/projects/' + selectedProject.id, updatedProject);
+        setSelectedProject(updatedProject);
+        setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
+      }
       setToast(mapped.length ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.' : 'The form is reachable, but no questions were mapped.');
     } catch {
       setFields([]);
@@ -207,35 +199,37 @@ function App() {
   };
 
   const createProject = async () => {
-    if (!newProject.name || !newProject.location || !newProject.topic) {
+    if (!newProject.name.trim() || !newProject.location.trim() || !newProject.topic.trim()) {
       setToast('Add a project name, location and research topic.');
       return;
     }
-    const project: Project = {
-      id: 'p-' + Date.now(),
-      name: newProject.name,
-      location: newProject.location,
-      topic: newProject.topic,
-      koboUrl: newProject.koboUrl,
-      formStatus: newProject.koboUrl ? 'Connected' : 'Not connected',
-      offlineReady: false,
-      researchCount: 0,
-      draftCount: 0,
-      approvedCount: 0,
-      updatedAt: 'Just now',
-    };
     try {
-      await api.post('/api/projects', project);
-    } catch {}
-    setProjects(p => [project, ...p]);
-    setSelectedProject(project);
-    setNewProject({ name: '', location: '', topic: '', koboUrl: '' });
-    setShowNewProject(false);
-    setPage('projects');
-    setToast('Project created.');
+      const result = await api.post('/api/projects', {
+        name: newProject.name.trim(),
+        location: newProject.location.trim(),
+        topic: newProject.topic.trim(),
+        koboUrl: newProject.koboUrl.trim(),
+        formStatus: newProject.koboUrl.trim() ? 'Needs inspection' : 'Not connected',
+        offlineReady: false, researchCount: 0, draftCount: 0, approvedCount: 0, updatedAt: 'Just now',
+      });
+      const project = result.data.project as Project;
+      setProjects(p => [project, ...p]);
+      setSelectedProject(project);
+      setKoboUrl(project.koboUrl || '');
+      setFields([]);
+      setSources([]);
+      setNewProject({ name: '', location: '', topic: '', koboUrl: '' });
+      setShowNewProject(false);
+      setPage('projects');
+      setToast('Project created and saved.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Project could not be saved.');
+    }
   };
 
+
   const generateDrafts = async () => {
+    if (!selectedProject.id) { setToast('Create or select a project first.'); return; }
     if (!koboState.checked || !fields.length) { setToast('Inspect the Kobo form first. Generation is blocked without mapped questions.'); return; }
     setIsGenerating(true);
     try {
@@ -253,42 +247,43 @@ function App() {
       setDrafts(d => [...incoming, ...d]);
       setPage('review');
       setToast(incoming.length + ' complete synthetic QA records created.');
-    } catch {
-      setToast('AI generation failed. Try again.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'AI generation failed. Try again.');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const updateDraft = async (updated: Draft, successMessage?: string) => {
+    try {
+      await api.put('/api/drafts/' + updated.id, updated);
+      setDrafts(all => all.map(d => d.id === updated.id ? updated : d));
+      if (successMessage) setToast(successMessage);
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Could not save draft changes.');
     }
   };
 
   const approveField = async (draftId: string, fieldName: string) => {
     const target = drafts.find(d => d.id === draftId);
     if (!target) return;
-    const fields = target.fields.map(f =>
-      f.name === fieldName ? { ...f, status: 'approved' as const } : f
-    );
-    const updated = { ...target, fields };
-    setDrafts(all => all.map(d => (d.id === draftId ? updated : d)));
-    try {
-      await api.put('/api/drafts/' + draftId, updated);
-    } catch {}
+    await updateDraft({ ...target, fields: target.fields.map(f => f.name === fieldName ? { ...f, status: 'approved' as const } : f) });
   };
 
   const rejectField = async (draftId: string, fieldName: string) => {
     const target = drafts.find(d => d.id === draftId);
     if (!target) return;
-    const fields = target.fields.map(f =>
-      f.name === fieldName ? { ...f, status: 'rejected' as const } : f
-    );
-    const updated = { ...target, fields };
-    setDrafts(all => all.map(d => (d.id === draftId ? updated : d)));
-    try {
-      await api.put('/api/drafts/' + draftId, updated);
-    } catch {}
+    await updateDraft({ ...target, status: 'review' as const, fields: target.fields.map(f => f.name === fieldName ? { ...f, status: 'rejected' as const } : f) });
   };
 
   const deleteDraft = async (draftId: string) => {
-    try { await api.delete('/api/drafts/' + draftId); } catch {}
-    setDrafts(all => all.filter(d => d.id !== draftId)); setToast('Synthetic record deleted.');
+    try {
+      await api.delete('/api/drafts/' + draftId);
+      setDrafts(all => all.filter(d => d.id !== draftId));
+      setToast('Synthetic record deleted.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Could not delete the record.');
+    }
   };
 
   const editDraft = async (draft: Draft) => {
@@ -297,8 +292,56 @@ function App() {
     try {
       const values = JSON.parse(raw) as Record<string, string>;
       const updated = { ...draft, status: 'review' as const, fields: draft.fields.map(f => ({ ...f, value: values[f.name] === undefined ? f.value : String(values[f.name]), status: 'review' as const })) };
-      await api.put('/api/drafts/' + draft.id, updated); setDrafts(all => all.map(d => d.id === draft.id ? updated : d)); setToast('Changes saved. The record returned to review.');
-    } catch { setToast('Invalid JSON. No changes were saved.'); }
+      await updateDraft(updated, 'Changes saved. The record returned to review.');
+    } catch {
+      setToast('Invalid JSON. No changes were saved.');
+    }
+  };
+
+  const selectProject = async (project: Project) => {
+    setSelectedProject(project);
+    setKoboUrl(project.koboUrl || '');
+    setFields([]);
+    setKoboState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+    try {
+      const result = await api.get('/api/sources?projectId=' + encodeURIComponent(project.id));
+      setSources(Array.isArray(result.data?.sources) ? result.data.sources : []);
+    } catch (e) {
+      setSources([]);
+      setToast(e instanceof Error ? e.message : 'Could not load the research library.');
+    }
+  };
+
+  const addSource = async () => {
+    if (!selectedProject.id) { setToast('Create or select a project first.'); return; }
+    const title = window.prompt('Source title');
+    if (!title?.trim()) return;
+    const facility = window.prompt('Facility / area', selectedProject.location || '') || '';
+    const yearRaw = window.prompt('Publication year', String(new Date().getFullYear()));
+    const type = window.prompt('Source type', 'Literature') || 'Literature';
+    const finding = window.prompt('Key documented finding / note');
+    if (!finding?.trim()) return;
+    try {
+      const result = await api.post('/api/sources', { projectId: selectedProject.id, title: title.trim(), facility: facility.trim(), year: Number(yearRaw) || new Date().getFullYear(), type: type.trim(), finding: finding.trim() });
+      setSources(all => [result.data.source, ...all]);
+      setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, researchCount: (p.researchCount || 0) + 1 } : p));
+      setSelectedProject(p => ({ ...p, researchCount: (p.researchCount || 0) + 1 }));
+      setToast('Evidence source saved.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Source could not be saved.');
+    }
+  };
+
+  const deleteSource = async (sourceId: string) => {
+    try {
+      await api.delete('/api/sources/' + sourceId);
+      setSources(all => all.filter(s => s.id !== sourceId));
+      setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, researchCount: Math.max(0, (p.researchCount || 0) - 1) } : p));
+      setSelectedProject(p => ({ ...p, researchCount: Math.max(0, (p.researchCount || 0) - 1) }));
+      setToast('Source removed.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Source could not be removed.');
+    }
   };
 
   const confirmAll = async () => {
@@ -308,15 +351,29 @@ function App() {
       const result = await api.post('/api/drafts/confirm-all', { projectId: selectedProject.id });
       setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'confirmed', fields: d.fields.map(f => ({ ...f, status: 'approved' as const })) } : d));
       setToast(result.data?.message || 'Everything is confirmed.');
-    } catch { setToast('Confirmation failed.'); }
+    } catch (e) { setToast(e instanceof Error ? e.message : 'Confirmation failed.'); }
+  };
+
+  const exportPackage = async () => {
+    if (!confirmed) { setToast('Export is locked until every record is confirmed.'); return; }
+    try {
+      const result = await api.post('/api/drafts/export', { projectId: selectedProject.id });
+      const blob = new Blob([result.data.csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = result.data.filename || 'fieldmind-reviewed-synthetic-qa.csv';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      setToast('Reviewed synthetic QA CSV downloaded.');
+    } catch (e) { setToast(e instanceof Error ? e.message : 'Export failed.'); }
   };
 
   const deployPackage = async () => {
-    if (!confirmed) { setToast('Deployment is locked until every record is confirmed.'); return; }
+    if (!confirmed) { setToast('Package preparation is locked until every record is confirmed.'); return; }
     try {
       const result = await api.post('/api/drafts/deploy', { projectId: selectedProject.id });
-      setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'deployed' } : d)); setToast(result.data?.message || 'Controlled QA package prepared.');
-    } catch { setToast('Package preparation failed.'); }
+      setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'deployed' } : d));
+      setToast(result.data?.message || 'Controlled QA package prepared.');
+    } catch (e) { setToast(e instanceof Error ? e.message : 'Package preparation failed.'); }
   };
 
   const navTo = (key: string) => {
@@ -363,7 +420,7 @@ function App() {
           </p>
         </div>
         <div className="sidebar-foot">
-          <span className="status-dot" /> System operational
+          <span className="status-dot" /> {backendState === 'ready' ? 'System operational' : backendState === 'checking' ? 'Connecting…' : 'Backend needs attention'}
         </div>
       </aside>
 
@@ -390,6 +447,7 @@ function App() {
             <div className="avatar">FM</div>
           </div>
         </header>
+        {backendState !== 'ready' && <div className={'system-banner ' + backendState}><ShieldCheck size={15}/><span>{backendState === 'checking' ? 'Connecting to the research backend…' : 'The backend is unavailable or incompletely configured. Actions are disabled until the connection is restored.'}</span></div>}
 
         {page === 'overview' && (
           <section className="content">
@@ -430,27 +488,23 @@ function App() {
                     <span>
                       <FlaskConical size={14} /> THIKA LEVEL 5
                     </span>
-                    <span className="live-chip">LIVE</span>
+                    <span className="live-chip">WORKSPACE</span>
                   </div>
                   <div className="signal-row">
                     <div>
                       <small>Evidence coverage</small>
-                      <strong>84%</strong>
+                      <strong>{projects.length ? Math.round(Math.min(100, (sources.length / Math.max(1, 6)) * 100)) : 0}%</strong>
                     </div>
                     <div className="ring">
                       <span>AI</span>
                     </div>
                   </div>
                   <div className="bar">
-                    <i style={{ width: '84%' }} />
+                    <i style={{ width: `${projects.length ? Math.round(Math.min(100, (sources.length / Math.max(1, 6)) * 100)) : 0}%` }} />
                   </div>
                   <div className="mini-grid">
-                    <span>
-                      <Database size={14} /> 6 sources
-                    </span>
-                    <span>
-                      <ClipboardCheck size={14} /> 12 drafts
-                    </span>
+                    <span><Database size={14} /> {sources.length} sources</span>
+                    <span><ClipboardCheck size={14} /> {projectDrafts.length} drafts</span>
                   </div>
                 </div>
               </div>
@@ -469,7 +523,7 @@ function App() {
               />
               <Stat
                 label="Pending review"
-                value={pending || selectedProject.draftCount}
+                value={pending}
                 icon={ClipboardCheck}
               />
               <Stat
@@ -633,20 +687,21 @@ function App() {
               </div>
               <button
                 className="primary"
+                disabled={backendState !== 'ready'}
                 onClick={() => setShowNewProject(true)}
               >
                 <Plus size={17} /> New project
               </button>
             </div>
             <div className="project-list">
-              {projects.map(p => (
+              {projects.length === 0 ? <div className="empty-state"><Layers3 size={30}/><h3>No research projects yet</h3><p>Create your first project to connect a Kobo form and build its evidence library.</p></div> : projects.map(p => (
                 <button
                   key={p.id}
                   className={
                     'project-row ' +
                     (selectedProject.id === p.id ? 'selected' : '')
                   }
-                  onClick={() => setSelectedProject(p)}
+                  onClick={() => selectProject(p)}
                 >
                   <div className="project-icon">
                     <FlaskConical size={19} />
@@ -776,11 +831,7 @@ function App() {
               </div>
               <button
                 className="secondary"
-                onClick={() =>
-                  setToast(
-                    'Source entry editor is ready for the next build step.'
-                  )
-                }
+                onClick={addSource}
               >
                 <Plus size={16} /> Add source
               </button>
@@ -806,8 +857,10 @@ function App() {
                     <span>{s.year}</span>
                   </div>
                   <p>{s.finding}</p>
-                  <button className="source-link">
+                  <button className="source-link" onClick={() => window.alert(s.finding)}>
                     View evidence <ArrowRight size={14} />
+                  </button><button className="source-link danger" onClick={() => deleteSource(s.id)}>
+                    Remove <X size={14} />
                   </button>
                 </div>
               ))}
@@ -932,17 +985,16 @@ function App() {
                 <div className="export-icon">
                   <FileSpreadsheet size={21} />
                 </div>
-                <h3>Reviewed XLSX</h3>
+                <h3>Reviewed CSV</h3>
                 <p>
-                  Export field/value pairs from records whose individual fields
-                  have been confirmed.
+                  Download field/value pairs from records that have completed human confirmation.
                 </p>
                 <button
                   className="secondary"
                   disabled={!confirmed}
-                  onClick={deployPackage}
+                  onClick={exportPackage}
                 >
-                  {confirmed ? 'Prepare QA package' : 'Locked until confirmation'} <ArrowRight size={15} />
+                  {confirmed ? 'Download reviewed CSV' : 'Locked until confirmation'} <ArrowRight size={15} />
                 </button>
               </div>
               <div className="export-card">
@@ -956,7 +1008,7 @@ function App() {
                 </p>
                 <button
                   className="secondary"
-                  onClick={() => window.open(selectedProject.koboUrl, '_blank')}
+                  onClick={() => selectedProject.koboUrl ? window.open(selectedProject.koboUrl, '_blank') : setToast('No Kobo form is connected to this project.')}
                 >
                   Open Kobo form <ArrowRight size={15} />
                 </button>
@@ -1046,7 +1098,7 @@ function App() {
                   placeholder="https://ee.kobotoolbox.org/x/..."
                 />
               </label>
-              <button className="primary full" onClick={createProject}>
+              <button className="primary full" disabled={backendState !== 'ready'} onClick={createProject}>
                 Create project <ArrowRight size={16} />
               </button>
             </div>
