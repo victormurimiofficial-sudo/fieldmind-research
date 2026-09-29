@@ -133,6 +133,7 @@ function App() {
   const projectDrafts = useMemo(() => drafts.filter(d => d.projectId === selectedProject.id), [drafts, selectedProject.id]);
   const pending = projectDrafts.filter(d => d.status !== 'confirmed' && d.status !== 'deployed').length;
   const confirmed = projectDrafts.length > 0 && projectDrafts.every(d => d.status === 'confirmed' || d.status === 'deployed');
+  const hasRejectedFields = projectDrafts.some(d => d.fields.some(f => f.status === 'rejected'));
   const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
 
   useEffect(() => {
@@ -343,6 +344,7 @@ function App() {
   };
 
   const confirmAll = async () => {
+    if (hasRejectedFields) { setToast('Resolve every rejected field before final confirmation.'); return; }
     if (!projectDrafts.length) { setToast('There are no records to confirm.'); return; }
     if (fields.length && projectDrafts.some(d => d.fields.length !== fields.length)) { setToast('Confirmation blocked: a record is missing mapped questions.'); return; }
     try {
@@ -786,6 +788,25 @@ function App() {
                     <i />
                   </div>
                 </div>
+                <div className="setting">
+                  <div>
+                    <strong>Age distribution</strong>
+                    <span>QA coverage mix for synthetic fixtures</span>
+                  </div>
+                  <input className="setting-input" value={ageMix} onChange={e => setAgeMix(e.target.value)} />
+                </div>
+                <div className="setting">
+                  <div>
+                    <strong>Response tendency</strong>
+                    <span>QA scenario preference, not observed participant data</span>
+                  </div>
+                  <select className="setting-input" value={majority} onChange={e => setMajority(e.target.value)}>
+                    <option>No directional tendency</option>
+                    <option>Mostly agrees</option>
+                    <option>Mostly disagrees</option>
+                    <option>Mixed responses</option>
+                  </select>
+                </div>
                 <div className="count-row large">
                   <label>Number of draft records</label>
                   <div className="stepper">
@@ -1026,6 +1047,9 @@ function App() {
                   <strong>{approved}</strong>
                   <span>fully reviewed drafts</span>
                 </div>
+                <button className="secondary" disabled={!confirmed} onClick={deployPackage}>
+                  {confirmed ? 'Prepare controlled QA package' : 'Locked until confirmation'} <ArrowRight size={15} />
+                </button>
               </div>
             </div>
             <div className="evidence-banner">
