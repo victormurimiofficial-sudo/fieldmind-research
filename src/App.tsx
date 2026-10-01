@@ -31,6 +31,8 @@ import {
   ChevronRight,
   ClipboardCheck,
   Database,
+  Eye,
+  EyeOff,
   FileCheck2,
   FileSpreadsheet,
   FlaskConical,
@@ -126,6 +128,7 @@ function App() {
   const [fields, setFields] = useState<FormField[]>([]);
   const [koboUrl, setKoboUrl] = useState('');
   const [koboToken, setKoboToken] = useState('');
+  const [showKoboToken, setShowKoboToken] = useState(false);
   const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
   const [koboCandidates, setKoboCandidates] = useState<{ uid: string; name: string; url: string }[]>([]);
   const [koboCandidateUid, setKoboCandidateUid] = useState('');
