@@ -124,7 +124,6 @@ function App() {
   const [selectedProject, setSelectedProject] = useState<Project>(emptyProject);
   const [fields, setFields] = useState<FormField[]>([]);
   const [koboUrl, setKoboUrl] = useState('');
-  const [koboSource, setKoboSource] = useState('');
   const [koboToken, setKoboToken] = useState('');
   const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
   const [draftCount, setDraftCount] = useState(1);
@@ -190,7 +189,7 @@ function App() {
   const checkKobo = async () => {
     setKoboState(s => ({ ...s, checked: false }));
     try {
-      const result = await api.post('/api/kobo/inspect', { url: koboUrl, assetUid: koboSource.trim(), apiToken: koboToken.trim() });
+      const result = await api.post('/api/kobo/inspect', { url: koboUrl.trim(), apiToken: koboToken.trim() });
       const mapped = Array.isArray(result.data?.fields) ? result.data.fields : [];
       setFields(mapped);
       setKoboState({ checked: true, offline: Boolean(result.data?.offlineReady), title: result.data?.title || 'Kobo form', questionCount: mapped.length, error: '' });
@@ -746,15 +745,28 @@ function App() {
                   </div>
                   <span className="badge green">ACTIVE</span>
                 </div>
-                <label className="field-label">Kobo form URL</label>
+                <label className="field-label">Kobo form or project Summary URL</label>
                 <div className="url-row">
                   <input
                     value={koboUrl}
                     onChange={e => setKoboUrl(e.target.value)}
+                    placeholder="https://kf.kobotoolbox.org/#/forms/.../summary or https://ee.kobotoolbox.org/x/..."
                   />
-                  <button onClick={checkKobo}>Inspect</button>
+                  <button onClick={checkKobo} disabled={!koboUrl.trim()}>Inspect</button>
                 </div>
-                <div className="kobo-source"><label className="field-label">Kobo project URL or Asset UID <span>optional</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="Paste project URL or Asset UID for exact XForm mapping" /><label className="field-label">Kobo API key <span>optional · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Only needed for private forms" autoComplete="off" /></div>
+                <p className="field-help">Paste one Kobo link. FieldMind detects the server and Asset UID automatically, then retrieves the deployed XForm.</p>
+                <details className="kobo-advanced">
+                  <summary>Advanced: private Kobo form / API key</summary>
+                  <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
+                  <input
+                    type="password"
+                    value={koboToken}
+                    onChange={e => setKoboToken(e.target.value)}
+                    placeholder="Paste your current Kobo API key"
+                    autoComplete="off"
+                  />
+                  <p className="field-help">Kobo's current API requires a token for API requests. The key is sent only to FieldMind's inspection endpoint and is never stored with the project.</p>
+                </details>
                 <div className="field-map">
                   <div className="field-map-head">
                     <span>Detected form fields</span>
