@@ -844,6 +844,11 @@ export default async function handler(req: any, res: any) {
         send(res, 400, { message: 'Project, title and finding are required' });
         return;
       }
+      const sourceProject = await getById(String(body.projectId));
+      if (!sourceProject || sourceProject.collection !== 'projects' || !ownerMatches(sourceProject, authUser!)) {
+        send(res, 403, { message: 'You do not have access to this research project.' });
+        return;
+      }
       const ids = await insert('sources', [body], authUser!);
       send(res, 200, { source: { ...body, id: ids[0] } });
       return;
@@ -1030,7 +1035,7 @@ export default async function handler(req: any, res: any) {
             ...draft,
             status: 'confirmed',
             fields: draft.fields.map(field => ({ ...field, status: 'approved' })),
-          })
+          }, authUser!)
         )
       );
 
@@ -1065,7 +1070,7 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'POST' && path === '/api/drafts/deploy') {
       const projectId = String(body.projectId || '');
-      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+      const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
 
       if (!items.length) {
         send(res, 400, { message: 'No records found for this project' });
@@ -1078,7 +1083,7 @@ export default async function handler(req: any, res: any) {
       }
 
       await Promise.all(
-        items.map(draft => update(String(draft.id), { ...draft, status: 'deployed' }))
+        items.map(draft => update(String(draft.id), { ...draft, status: 'deployed' }, authUser!))
       );
 
       send(res, 200, {
