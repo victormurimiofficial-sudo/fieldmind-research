@@ -215,7 +215,7 @@ function parseXForm(xml: string): { title: string; fields: FormField[] } {
       required: attr(raw, 'required'),
       relevant: attr(raw, 'relevant'),
       constraint: attr(raw, 'constraint'),
-      calculation: attr(raw, 'calculate') || attr(raw, 'jr:calculate'),
+      calculation: attr(raw, 'calculate') || attr(raw, 'jr:calculate'),\n      readonly: attr(raw, 'readonly'),
     });
   }
 
@@ -247,7 +247,7 @@ function parseXForm(xml: string): { title: string; fields: FormField[] } {
     }
 
     const type = binding.type || fallbackType || 'text';
-    if (/calculate|note|hidden/i.test(type) || binding.calculation) return;
+    if (/calculate|note|hidden/i.test(type) || binding.calculation || /true\\(\\)|true|1/i.test(binding.readonly || '')) return;
 
     seen.add(name);
     fields.push({
