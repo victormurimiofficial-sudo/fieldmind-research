@@ -852,7 +852,7 @@ export default async function handler(req: any, res: any) {
     const sourceMatch = path.match(/^\/api\/sources\/([^/]+)$/);
     if (sourceMatch && req.method === 'PUT') {
       const id = sourceMatch[1];
-      const ok = await update(id, { ...body, id });
+      const ok = await update(id, { ...body, id }, authUser!);
       send(res, ok ? 200 : 404, { source: { ...body, id } });
       return;
     }
@@ -994,7 +994,7 @@ export default async function handler(req: any, res: any) {
         });
       });
 
-      const ids = await insert('drafts', output as AnyRecord[]);
+      const ids = await insert('drafts', output as AnyRecord[], authUser!);
       send(res, 200, {
         drafts: output.map((draft, index) => ({ ...draft, id: ids[index] })),
         mode: 'synthetic',
@@ -1005,7 +1005,7 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'POST' && path === '/api/drafts/confirm-all') {
       const projectId = String(body.projectId || '');
-      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+      const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
 
       if (!projectId || !items.length) {
         send(res, 400, { message: 'No records found for this project' });
