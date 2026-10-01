@@ -5,9 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f8f6" />
     <title>FieldMind Research AI</title>
+    <style>
+      #boot-screen{min-height:100vh;display:grid;place-items:center;background:#f5f6f3;color:#26322b;font:14px Inter,ui-sans-serif,system-ui,sans-serif}
+      #boot-card{width:min(520px,calc(100% - 32px));padding:28px;border:1px solid #e0e5df;border-radius:18px;background:#fff;box-shadow:0 18px 55px rgba(20,30,24,.08)}
+      #boot-card strong{display:block;font-size:18px;margin-bottom:7px}
+      #boot-card span{color:#758078;font-size:12px;line-height:1.6}
+      #boot-error{display:none;margin-top:14px;padding:12px;border-radius:10px;background:#fff6f6;border:1px solid #ead7d7;color:#8b6262;font-size:11px;white-space:pre-wrap}
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-screen">
+        <div id="boot-card">
+          <strong>FieldMind Research</strong>
+          <span>Loading the research workspace…</span>
+          <div id="boot-error"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.addEventListener('error', function(event) {
+        var box = document.getElementById('boot-error');
+        if (box) {
+          box.style.display = 'block';
+          box.textContent = 'The workspace failed to start.\n' + (event.error?.stack || event.message || 'Unknown browser error');
+        }
+      });
+      window.addEventListener('unhandledrejection', function(event) {
+        var box = document.getElementById('boot-error');
+        if (box) {
+          box.style.display = 'block';
+          box.textContent = 'The workspace failed to start.\n' + (event.reason?.stack || event.reason?.message || String(event.reason));
+        }
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
