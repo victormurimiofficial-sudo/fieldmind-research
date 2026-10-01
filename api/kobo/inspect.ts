@@ -250,7 +250,7 @@ async function inspect(url: string, source: string, token: string) {
   // an Asset UID problem.
   const authenticatedBases: string[] = [];
   if (auth) {
-    for (const base of apiBases) {
+    for (const base of bases) {
       try {
         const me = await fetchText(base + '/me/', headers);
         statuses.push({
