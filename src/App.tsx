@@ -235,6 +235,12 @@ function App() {
         questionCount: mapped.length,
         error: '',
       });
+
+      // Inspection is the source of truth for the UI. Do not throw away a
+      // successful Kobo mapping just because the follow-up project save fails.
+      // The old flow put this PUT inside the inspection try/catch, so a 404
+      // from project persistence immediately cleared the questions that had
+      // just been mapped and made it look like Kobo inspection itself failed.
       if (selectedProject.id) {
         const updatedProject = {
           ...selectedProject,
@@ -243,13 +249,26 @@ function App() {
           offlineReady: Boolean(data.offlineReady),
           updatedAt: 'Just now',
         };
-        await api.put('/api/projects/' + selectedProject.id, updatedProject);
-        setSelectedProject(updatedProject);
-        setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
+        try {
+          const saved = await api.put('/api/projects/' + selectedProject.id, updatedProject);
+          if (saved.data?.project) {
+            setSelectedProject(updatedProject);
+            setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
+          } else {
+            throw new Error('Project connection could not be saved.');
+          }
+        } catch (saveError) {
+          setSelectedProject(updatedProject);
+          setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
+          setToast('Kobo questions mapped successfully, but the project connection could not be saved yet.');
+          console.error('FieldMind project persistence error', saveError);
+        }
       }
-      setToast(mapped.length
-        ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.'
-        : 'The form is reachable, but no questions were mapped.');
+      if (!selectedProject.id || mapped.length) {
+        setToast(mapped.length
+          ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.'
+          : 'The form is reachable, but no questions were mapped.');
+      }
     } catch (e) {
       setFields([]);
       setKoboCandidates([]);
