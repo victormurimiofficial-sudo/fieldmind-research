@@ -725,16 +725,33 @@ function App() {
               <div className="panel ai-panel">
                 <div className="panel-head">
                   <div>
-                    <h3>Generate synthetic drafts</h3>
+                    <h3>AI compiler</h3>
                     <p>
-                      AI behaves like a trained field researcher, but every
-                      answer stays reviewable.
+                      Compile the mapped Kobo questionnaire into reviewable
+                      synthetic QA fixtures using the project's evidence context.
                     </p>
                   </div>
                   <Zap size={18} />
                 </div>
+                {fields.length > 0 && (
+                  <div className="field-map" style={{ marginBottom: 16 }}>
+                    <div className="field-map-head">
+                      <span>Compiled Kobo questionnaire</span>
+                      <span>{fields.length} questions</span>
+                    </div>
+                    <div style={{ maxHeight: 190, overflowY: 'auto' }}>
+                      {fields.map((field, index) => (
+                        <div className="field-item" key={field.name}>
+                          <span>{index + 1}. {field.label}</span>
+                          <code>{field.name}</code>
+                          <small>{field.type}{field.required ? ' · required' : ''}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="count-row">
-                  <label>Draft records</label>
+                  <label>QA fixtures</label>
                   <div className="stepper">
                     <button
                       onClick={() => setDraftCount(Math.max(1, draftCount - 1))}
@@ -761,12 +778,12 @@ function App() {
                   ) : (
                     <Sparkles size={16} />
                   )}
-                  {isGenerating ? 'Generating…' : 'Generate for review'}{' '}
+                  {isGenerating ? 'Compiling…' : 'Compile for review'}{' '}
                   <ArrowRight size={15} />
                 </button>
                 <div className="ai-note">
-                  <ShieldCheck size={14} /> Generated records are explicitly
-                  marked synthetic and require human approval.
+                  <ShieldCheck size={14} /> QA mode only: every compiled record is
+                  explicitly synthetic, reviewable and never submitted to Kobo.
                 </div>
               </div>
             </div>
