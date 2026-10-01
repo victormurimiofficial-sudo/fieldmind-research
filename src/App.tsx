@@ -112,6 +112,16 @@ const emptyProject: Project = {
 
 
 const WORKSPACE_STORAGE_KEY = 'fieldmind:workspace:v2';
+const KOBO_TOKEN_SESSION_KEY = 'fieldmind:kobo-token:v1';
+
+function readKoboTokenSession() {
+  if (typeof window === 'undefined') return '';
+  try {
+    return window.sessionStorage.getItem(KOBO_TOKEN_SESSION_KEY) || '';
+  } catch {
+    return '';
+  }
+}
 
 type WorkspaceSnapshot = {
   version: 2;
@@ -162,7 +172,7 @@ function App() {
   const [selectedProject, setSelectedProject] = useState<Project>(() => cached?.selectedProject || emptyProject);
   const [fields, setFields] = useState<FormField[]>(() => cached?.fields || []);
   const [koboUrl, setKoboUrl] = useState(() => cached?.koboUrl || cached?.selectedProject?.koboUrl || '');
-  const [koboToken, setKoboToken] = useState('');
+  const [koboToken, setKoboToken] = useState(() => readKoboTokenSession());
   const [showKoboToken, setShowKoboToken] = useState(false);
   const [koboState, setKoboState] = useState(() => cached?.koboState || { checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
   const [koboCandidates, setKoboCandidates] = useState(() => cached?.koboCandidates || []);
@@ -869,14 +879,21 @@ function App() {
                 )}
                 <details className="kobo-advanced" open={Boolean(koboToken)}>
                   <summary>Advanced: private Kobo form / API key</summary>
-                  <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
+                  <label className="field-label">Kobo API key <span>used for this inspection · kept only for this browser tab</span></label>
                   <div className="secret-row">
                     <input
                       type={showKoboToken ? 'text' : 'password'}
                       value={koboToken}
-                      onChange={e => setKoboToken(e.target.value)}
+                      onChange={e => {
+                        const value = e.target.value;
+                        setKoboToken(value);
+                        try {
+                          if (value) window.sessionStorage.setItem(KOBO_TOKEN_SESSION_KEY, value);
+                          else window.sessionStorage.removeItem(KOBO_TOKEN_SESSION_KEY);
+                        } catch {}
+                      }}
                       placeholder="Paste your current Kobo API key"
-                      autoComplete="off"
+                      autoComplete="new-password"
                       spellCheck={false}
                     />
                     <button
@@ -890,7 +907,7 @@ function App() {
                       <span>{showKoboToken ? "Hide" : "Show"}</span>
                     </button>
                   </div>
-                  <p className="field-help">You can reveal the key here to verify it was pasted correctly. It stays in this browser session and is sent only to FieldMind’s inspection endpoint.</p>
+                  <p className="field-help">The key is kept only in this browser tab session so a refresh does not make you paste it again. It is not stored with the project and is sent only to FieldMind’s inspection endpoint.</p>
                 </details>
                 <div className="connection-result">
                   <span
