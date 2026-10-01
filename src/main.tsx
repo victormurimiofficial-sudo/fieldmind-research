@@ -27,7 +27,7 @@ class AppErrorBoundary extends React.Component<
               The deployment loaded, but the application hit a browser error. Refresh once; if it remains, send this message to the developer.
             </p>
             <pre style={{ marginTop: 16, padding: 12, overflow: 'auto', borderRadius: 10, background: '#fff6f6', border: '1px solid #ead7d7', color: '#8b6262', fontSize: 11, whiteSpace: 'pre-wrap' }}>
-              {this.state.error.message}
+              {this.state.error.stack || this.state.error.message}
             </pre>
           </div>
         </div>
