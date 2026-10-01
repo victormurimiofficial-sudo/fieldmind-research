@@ -72,6 +72,13 @@ type Project = {
   draftCount: number;
   approvedCount: number;
   updatedAt: string;
+  koboAssetUid?: string;
+  koboSubmission?: {
+    formId: string;
+    formhubUuid: string;
+    submissionServer: string;
+    ownerUsername?: string;
+  };
 };
 
 type Source = {
@@ -101,6 +108,7 @@ type Draft = {
   fields: DraftField[];
   createdAt: string;
   status?: 'review' | 'confirmed' | 'deployed';
+  testSubmission?: { submittedAt: string; target: string };
 };
 
 const emptyProject: Project = {
@@ -211,6 +219,8 @@ function App() {
   const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showSourceModal, setShowSourceModal] = useState(false);
+  const [showTestSubmitModal, setShowTestSubmitModal] = useState(false);
+  const [isSubmittingTest, setIsSubmittingTest] = useState(false);
   const [newSource, setNewSource] = useState({ title: '', facility: '', year: String(new Date().getFullYear()), type: 'Literature', finding: '' });
   const [newProject, setNewProject] = useState({
     name: '',
@@ -411,6 +421,14 @@ function App() {
           formStatus: mapped.length ? 'Connected' : 'Needs inspection',
           offlineReady: Boolean(data.offlineReady),
           updatedAt: 'Just now',
+          ...(data.assetUid ? { koboAssetUid: String(data.assetUid) } : {}),
+          ...(data.formId ? {
+            koboSubmission: {
+              formId: String(data.formId),
+              formhubUuid: String(data.formhubUuid || ''),
+              submissionServer: String(data.submissionServer || ''),
+            },
+          } : {}),
         };
         try {
           const saved = await api.put('/api/projects/' + selectedProject.id, updatedProject);
@@ -652,6 +670,30 @@ function App() {
       setDrafts(all => all.map(d => d.projectId === selectedProject.id ? { ...d, status: 'deployed' } : d));
       setToast(result.data?.message || 'Controlled QA package prepared.');
     } catch (e) { setToast(e instanceof Error ? e.message : 'Package preparation failed.'); }
+  };
+
+  const submitSyntheticTest = async () => {
+    if (!confirmed) { setToast('Confirm every synthetic QA fixture before sending the test batch.'); return; }
+    if (!koboToken.trim()) { setToast('Enter the Kobo API key under the form connection settings first.'); return; }
+    setIsSubmittingTest(true);
+    try {
+      const result = await api.post('/api/drafts/submit-test', {
+        projectId: selectedProject.id,
+        apiToken: koboToken.trim(),
+        testOnly: true,
+      });
+      setDrafts(all => all.map(d => d.projectId === selectedProject.id ? {
+        ...d,
+        status: 'deployed',
+        testSubmission: { submittedAt: new Date().toISOString(), target: 'kobo-openrosa-test' },
+      } : d));
+      setShowTestSubmitModal(false);
+      setToast(result.data?.message || (result.data?.submitted || 0) + ' synthetic QA submissions sent to Kobo.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Kobo test submission failed.');
+    } finally {
+      setIsSubmittingTest(false);
+    }
   };
 
   const resetWorkspace = async () => {
@@ -1471,17 +1513,20 @@ function App() {
                 <div className="export-icon">
                   <ShieldCheck size={21} />
                 </div>
-                <h3>Audit trail</h3>
+                <h3>Synthetic Kobo test</h3>
                 <p>
-                  Every AI field carries its confidence, evidence note and
-                  review status before it can be treated as approved.
+                  Send the confirmed synthetic QA fixtures to the connected Kobo
+                  form to verify the complete submission pipeline. This is a test action only.
                 </p>
                 <div className="audit-count">
-                  <strong>{approved}</strong>
-                  <span>fully reviewed drafts</span>
+                  <strong>{confirmed ? projectDrafts.length : 0}</strong>
+                  <span>synthetic fixtures ready</span>
                 </div>
-                <button className="secondary" disabled={!confirmed} onClick={deployPackage}>
-                  {confirmed ? 'Prepare controlled QA package' : 'Locked until confirmation'} <ArrowRight size={15} />
+                <button className="secondary" disabled={!confirmed || isSubmittingTest} onClick={() => setShowTestSubmitModal(true)}>
+                  {confirmed ? 'Submit synthetic QA to Kobo' : 'Locked until confirmation'} <ArrowRight size={15} />
+                </button>
+                <button className="text-button" disabled={!confirmed} onClick={deployPackage}>
+                  Prepare local QA package instead
                 </button>
               </div>
             </div>
@@ -1498,6 +1543,40 @@ function App() {
               </div>
             </div>
           </section>
+        )}
+
+        {showTestSubmitModal && (
+          <div className="modal-backdrop" onClick={() => !isSubmittingTest && setShowTestSubmitModal(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <p className="eyebrow">SYNTHETIC QA · KOBO</p>
+                  <h3>Run the end-to-end test</h3>
+                </div>
+                <button disabled={isSubmittingTest} onClick={() => setShowTestSubmitModal(false)}><X size={18} /></button>
+              </div>
+              <div className="edit-note">
+                <ShieldCheck size={15} />
+                This will create {projectDrafts.length} clearly synthetic test submissions in the connected Kobo project.
+              </div>
+              <p className="field-help" style={{ marginTop: 14 }}>
+                Use a Kobo project reserved for testing. FieldMind will submit each confirmed fixture as a separate anonymous OpenRosa test submission. It does not use participant data.
+              </p>
+              <div className="audit-count" style={{ margin: '18px 0' }}>
+                <strong>{projectDrafts.length}</strong>
+                <span>submissions queued for this test</span>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="secondary" disabled={isSubmittingTest} onClick={() => setShowTestSubmitModal(false)}>
+                  Cancel
+                </button>
+                <button className="primary" disabled={isSubmittingTest} onClick={submitSyntheticTest}>
+                  {isSubmittingTest ? <RefreshCw className="spin" size={16} /> : <Zap size={16} />}
+                  {isSubmittingTest ? 'Submitting to Kobo…' : 'Confirm test submission'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {editingDraft && (
