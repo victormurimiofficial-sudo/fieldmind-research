@@ -218,16 +218,19 @@ async function inspect(url: string, source: string, token: string) {
   const auth = token || process.env.KOBO_API_TOKEN || '';
   const headers = auth ? { Authorization: 'Token ' + auth } : {};
   const inputHost = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  const preferred = inputHost === 'ee.kobotoolbox.org' || inputHost === 'eu.kobotoolbox.org'
-    ? 'https://eu.kobotoolbox.org'
-    : inputHost === 'kf.kobotoolbox.org'
-      ? 'https://kf.kobotoolbox.org'
+  // ee.kobotoolbox.org is Enketo's web-form host, not the KPI v2 API host.
+  // For a generic ee /x/ link, try both supported KPI servers instead of
+  // incorrectly forcing the form to the EU server.
+  const preferred = inputHost === 'kf.kobotoolbox.org'
+    ? 'https://kf.kobotoolbox.org'
+    : inputHost === 'eu.kobotoolbox.org' || inputHost === 'ee-eu.kobotoolbox.org'
+      ? 'https://eu.kobotoolbox.org'
       : '';
-  // If the user supplies a server-specific URL, never silently switch it to
-  // another Kobo server. Only use both servers when the host is ambiguous.
-  const bases = preferred
-    ? [preferred]
-    : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
+  const bases = inputHost === 'ee.kobotoolbox.org'
+    ? ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org']
+    : preferred
+      ? [preferred]
+      : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
   const statuses: Array<{ endpoint: string; status: number; contentType?: string }> = [];
 
   if (uid) {
