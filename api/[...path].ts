@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { ownerMatches, requireAuth, signIn, signOut, signUp, type AuthUser } from './_auth';
 
 type AnyRecord = Record<string, any>;
 type FormOption = { name: string; label: string };
@@ -49,7 +50,7 @@ function db() {
   });
 }
 
-async function list<T>(collection: string, limit = 500) {
+async function list<T>(collection: string, user: AuthUser, limit = 500) {
   const { data, error } = await db()
     .from(TABLE)
     .select('id,record')
@@ -57,67 +58,51 @@ async function list<T>(collection: string, limit = 500) {
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data || []).map((row: any) => ({ ...row.record, id: row.id })) as T[];
+  const rows = (data || []).map((row: any) => ({ ...row.record, id: row.id })) as T[];
+  return rows.filter((record: any) => ownerMatches(record, user));
 }
 
-async function insert(collection: string, records: AnyRecord[]) {
+async function insert(collection: string, records: AnyRecord[], user: AuthUser) {
   const { data, error } = await db()
     .from(TABLE)
-    .insert(records.map(record => ({ collection, record })))
+    .insert(records.map(record => ({ collection, record: { ...record, ownerId: user.id } })))
     .select('id');
   if (error) throw error;
   return (data || []).map((row: any) => row.id);
 }
 
-async function update(id: string, record: AnyRecord) {
+async function getById(id: string) {
+  const { data, error } = await db().from(TABLE).select('id,record,collection').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data ? { id: data.id, collection: data.collection, ...(data.record || {}) } : null;
+}
+
+async function update(id: string, record: AnyRecord, user: AuthUser) {
+  const current = await getById(id);
+  if (!current || !ownerMatches(current, user)) return false;
+  const safeRecord = { ...record, id, ownerId: current.ownerId || user.id };
   const { data, error } = await db()
     .from(TABLE)
-    .update({ record, updated_at: new Date().toISOString() })
+    .update({ record: safeRecord, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select('id');
   if (error) throw error;
   return Boolean(data?.length);
 }
 
-async function remove(id: string) {
+async function remove(id: string, user: AuthUser) {
+  const current = await getById(id);
+  if (!current || !ownerMatches(current, user)) return false;
   const { data, error } = await db().from(TABLE).delete().eq('id', id).select('id');
   if (error) throw error;
   return Boolean(data?.length);
 }
 
-async function seed() {
-  // Never create a project from application code.
-  // Clean only the exact legacy demo record created by the old build so a fresh
-  // workspace cannot reopen with the previous hard-coded Thika project.
-  const projects = await list<AnyRecord>('projects', 100);
-  if (!projects.length) return [];
-
-  const legacy = projects.filter(isLegacyDemoProject);
-  if (!legacy.length) return projects;
-
-  const [drafts, sources] = await Promise.all([
-    list<Draft>('drafts', 1000),
-    list<AnyRecord>('sources', 1000),
-  ]);
-
-  const legacyIds = new Set(legacy.map(project => String(project.id)));
-  const relatedDrafts = drafts.filter(draft => legacyIds.has(String(draft.projectId)));
-  const relatedSources = sources.filter(source => legacyIds.has(String(source.projectId)));
-
-  await Promise.all([
-    ...relatedDrafts.map(draft => remove(String(draft.id))),
-    ...relatedSources.map(source => remove(String(source.id))),
-    ...legacy.map(project => remove(String(project.id))),
-  ]);
-
-  return projects.filter(project => !legacyIds.has(String(project.id)));
-}
-
-async function projectsWithStats() {
-  const projects = await seed();
-  const [drafts, sources] = await Promise.all([
-    list<Draft>('drafts', 1000),
-    list<AnyRecord>('sources', 1000),
+async function projectsWithStats(user: AuthUser) {
+  const [projects, drafts, sources] = await Promise.all([
+    list<AnyRecord>('projects', user, 500),
+    list<Draft>('drafts', user, 1000),
+    list<AnyRecord>('sources', user, 1000),
   ]);
 
   return projects.map(project => {
@@ -743,6 +728,58 @@ export default async function handler(req: any, res: any) {
     const path = (catchallPath ? '/api/' + catchallPath.replace(/^\/+/, '') : pathname).replace(/\/$/, '') || '/';
     const body = bodyOf(req);
 
+    if (req.method === 'POST' && path === '/api/auth/signup') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      const name = String(body.name || '').trim();
+      if (!email || !password || password.length < 8) {
+        send(res, 400, { message: 'Use a valid email and a password of at least 8 characters.' });
+        return;
+      }
+      try {
+        const result = await signUp(email, password, name, res);
+        send(res, 200, {
+          user: result.user,
+          requiresEmailConfirmation: result.requiresEmailConfirmation,
+          message: result.requiresEmailConfirmation
+            ? 'Account created. Check your email to confirm the account, then sign in.'
+            : 'Account created. Welcome to FieldMind.',
+        });
+      } catch (error) {
+        send(res, 400, { message: error instanceof Error ? error.message : 'Could not create the account.' });
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/auth/login') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      if (!email || !password) {
+        send(res, 400, { message: 'Email and password are required.' });
+        return;
+      }
+      try {
+        const user = await signIn(email, password, res);
+        send(res, 200, { user, message: user.isAdmin ? 'Welcome back, Victor.' : 'Welcome to FieldMind.' });
+      } catch (error) {
+        send(res, 401, { message: error instanceof Error ? error.message : 'Invalid email or password.' });
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/auth/logout') {
+      await signOut(req, res);
+      send(res, 200, { signedOut: true });
+      return;
+    }
+
+    if (req.method === 'GET' && path === '/api/auth/me') {
+      const user = await requireAuth(req, res);
+      if (!user) return;
+      send(res, 200, { user });
+      return;
+    }
+
     if (req.method === 'GET' && path === '/api/_healthcheck') {
       const database = Boolean(
         process.env.SUPABASE_URL &&
@@ -753,15 +790,29 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    const authUser = await requireAuth(req, res);
+    if (!authUser) return;
+
+    if (req.method === 'POST' && path === '/api/admin/reset-workspace') {
+      if (!authUser!.isAdmin) {
+        send(res, 403, { message: 'Admin access required.' });
+        return;
+      }
+      const { error } = await db().from(TABLE).delete().not('id', 'is', null);
+      if (error) throw error;
+      send(res, 200, { cleared: true, message: 'All previous FieldMind research records were cleared.' });
+      return;
+    }
+
     if (req.method === 'GET' && path === '/api/projects') {
-      send(res, 200, { projects: await projectsWithStats() });
+      send(res, 200, { projects: await projectsWithStats(authUser!) });
       return;
     }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
     if (projectMatch && req.method === 'PUT') {
       const id = projectMatch[1];
-      const ok = await update(id, { ...body, id });
+      const ok = await update(id, { ...body, id }, authUser!);
       send(res, ok ? 200 : 404, { project: { ...body, id } });
       return;
     }
@@ -771,19 +822,19 @@ export default async function handler(req: any, res: any) {
         send(res, 400, { message: 'Project name, location and topic are required' });
         return;
       }
-      const ids = await insert('projects', [body]);
+      const ids = await insert('projects', [body], authUser!);
       send(res, 200, { project: { ...body, id: ids[0] } });
       return;
     }
 
     if (req.method === 'GET' && path === '/api/drafts') {
-      send(res, 200, { drafts: await list<Draft>('drafts', 500) });
+      send(res, 200, { drafts: await list<Draft>('drafts', authUser!, 500) });
       return;
     }
 
     if (req.method === 'GET' && path === '/api/sources') {
       const projectId = new URL(req.url || '/', 'https://fieldmind.local').searchParams.get('projectId') || '';
-      const all = await list<AnyRecord>('sources', 500);
+      const all = await list<AnyRecord>('sources', authUser!, 500);
       send(res, 200, { sources: projectId ? all.filter(source => String(source.projectId || '') === projectId) : all });
       return;
     }
@@ -793,7 +844,7 @@ export default async function handler(req: any, res: any) {
         send(res, 400, { message: 'Project, title and finding are required' });
         return;
       }
-      const ids = await insert('sources', [body]);
+      const ids = await insert('sources', [body], authUser!);
       send(res, 200, { source: { ...body, id: ids[0] } });
       return;
     }
@@ -807,7 +858,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (sourceMatch && req.method === 'DELETE') {
-      const ok = await remove(sourceMatch[1]);
+      const ok = await remove(sourceMatch[1], authUser!);
       send(res, ok ? 200 : 404, { deleted: ok });
       return;
     }
@@ -821,7 +872,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (draftMatch && req.method === 'DELETE') {
-      const ok = await remove(draftMatch[1]);
+      const ok = await remove(draftMatch[1], authUser!);
       send(res, ok ? 200 : 404, { deleted: ok });
       return;
     }
