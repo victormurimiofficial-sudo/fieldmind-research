@@ -325,8 +325,10 @@ function App() {
       await api.put('/api/drafts/' + updated.id, updated);
       setDrafts(all => all.map(d => d.id === updated.id ? updated : d));
       if (successMessage) setToast(successMessage);
+      return true;
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Could not save draft changes.');
+      return false;
     }
   };
 
@@ -370,7 +372,8 @@ function App() {
         status: 'review' as const,
       })),
     };
-    await updateDraft(updated, 'Changes saved. The record returned to review.');
+    const saved = await updateDraft(updated, 'Changes saved. The record returned to review.');
+    if (!saved) return;
     setEditingDraft(null);
     setEditValues({});
   };
@@ -815,7 +818,7 @@ function App() {
                 </div>
                 <button
                   className="generate"
-                  disabled={isGenerating}
+                  disabled={isGenerating || !selectedProject.id || !fields.length}
                   onClick={generateDrafts}
                 >
                   {isGenerating ? (
