@@ -218,6 +218,18 @@ async function inspect(url: string, source: string, token: string) {
   const auth = token || process.env.KOBO_API_TOKEN || '';
   const headers = auth ? { Authorization: 'Token ' + auth } : {};
   const inputHost = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
+
+  // KPI v2 requires an API token for authenticated asset/XForm access.
+  // Fail explicitly instead of allowing an unauthenticated request to surface
+  // as a misleading 404 "Asset UID not found" message.
+  if (uid && !auth) {
+    return {
+      failure: true,
+      uid,
+      shareId,
+      statuses: [{ endpoint: 'authentication', status: 401 }],
+    };
+  }
   // ee.kobotoolbox.org is Enketo's web-form host, not the KPI v2 API host.
   // For a generic ee /x/ link, try both supported KPI servers instead of
   // incorrectly forcing the form to the EU server.
