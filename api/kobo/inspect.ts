@@ -122,6 +122,72 @@ function parseXForm(xml: string): { title: string; fields: FormField[] } {
   return { title, fields };
 }
 
+function parseKoboContent(content: any): { title: string; fields: FormField[] } | null {
+  if (!content || typeof content !== 'object' || !Array.isArray(content.survey)) return null;
+
+  const choices = new Map<string, FormOption[]>();
+  if (Array.isArray(content.choices)) {
+    for (const choice of content.choices) {
+      const listName = String(choice?.list_name || choice?.list || '').trim();
+      const value = String(choice?.name ?? choice?.value ?? '').trim();
+      if (!listName || !value) continue;
+      const labelValue = choice?.label;
+      const label = typeof labelValue === 'string'
+        ? labelValue
+        : typeof labelValue === 'object' && labelValue
+          ? String(Object.values(labelValue)[0] || value)
+          : value;
+      const list = choices.get(listName) || [];
+      list.push({ name: value, label: clean(String(label)) || value });
+      choices.set(listName, list);
+    }
+  }
+
+  const fields: FormField[] = [];
+  const seen = new Set<string>();
+
+  for (const item of content.survey) {
+    if (!item || typeof item !== 'object') continue;
+    const type = String(item.type || '').trim();
+    const name = String(item.name || '').trim();
+    if (!name || seen.has(name)) continue;
+    if (/^(begin_|end_|note|calculate|hidden|xml-external)$/i.test(type)) continue;
+
+    const labelValue = item.label;
+    const label = typeof labelValue === 'string'
+      ? labelValue
+      : typeof labelValue === 'object' && labelValue
+        ? String(Object.values(labelValue)[0] || name)
+        : name.replace(/[_-]+/g, ' ');
+
+    const optionMatch = type.match(/^(?:select_one|select_multiple)\s+(.+)$/i);
+    const optionList = optionMatch ? choices.get(optionMatch[1].trim()) || [] : [];
+    const requiredValue = item.required;
+    const required = requiredValue === true || /true\(\)|^true$|^1$/i.test(String(requiredValue || ''));
+
+    fields.push({
+      name,
+      label: clean(String(label)) || name.replace(/[_-]+/g, ' '),
+      type,
+      required,
+      ...(item.relevant ? { relevant: String(item.relevant) } : {}),
+      ...(item.constraint ? { constraint: String(item.constraint) } : {}),
+      ...(optionList.length ? { options: optionList } : {}),
+    });
+    seen.add(name);
+  }
+
+  if (!fields.length) return null;
+  const title = clean(
+    typeof content?.settings?.form_title === 'string'
+      ? content.settings.form_title
+      : typeof content?.settings?.title === 'string'
+        ? content.settings.title
+        : ''
+  ) || 'KoboToolbox form';
+  return { title, fields };
+}
+
 async function fetchText(url: string, headers: AnyRecord = {}) {
   const response = await fetch(url, {
     redirect: 'follow',
@@ -317,6 +383,19 @@ async function inspect(url: string, source: string, token: string) {
         if (metadataResult.response.ok) {
           try {
             const metadata = JSON.parse(metadataResult.text) as AnyRecord;
+
+            // Kobo can expose the questionnaire as structured XLSForm-style
+            // JSON in the asset metadata. Prefer this when available: it avoids
+            // depending on a particular XML download representation.
+            const contentForm = parseKoboContent(metadata.content);
+            if (contentForm?.fields.length) {
+              return {
+                ...contentForm,
+                source: 'Kobo API asset content',
+                resolvedUrl: metadataResult.response.url || base + '/api/v2/assets/' + encodeURIComponent(uid) + '/',
+              };
+            }
+
             const candidates = [
               typeof metadata.xform_link === 'string' ? metadata.xform_link : '',
               typeof metadata.downloads?.find === 'function'
