@@ -344,96 +344,139 @@ async function inspectKobo(url: string, source: string, token: string) {
     : inputHost === 'kf.kobotoolbox.org'
       ? 'https://kf.kobotoolbox.org'
       : '';
-  const bases = Array.from(new Set([preferred, 'https://eu.kobotoolbox.org', 'https://kf.kobotoolbox.org'].filter(Boolean)));
+  const bases = preferred
+    ? [preferred]
+    : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
+  const diagnostics: Array<{ endpoint: string; status: number; contentType?: string }> = [];
 
   if (uid) {
     for (const base of bases) {
+      const directCandidates = [
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
+      ];
+
+      for (const endpoint of directCandidates) {
+        try {
+          const result = await fetchText(endpoint, headers);
+          diagnostics.push({
+            endpoint: endpoint.replace(/https?:\/\//, ''),
+            status: result.response.status,
+            contentType: result.response.headers.get('content-type') || undefined,
+          });
+          if (!result.response.ok) continue;
+          const parsed = parseXForm(result.text);
+          if (parsed.fields.length) {
+            return { ...parsed, source: 'Kobo API XForm', resolvedUrl: result.response.url || endpoint, diagnostics };
+          }
+        } catch {}
+      }
+
       try {
         const detail = await fetchText(base + '/api/v2/assets/' + encodeURIComponent(uid) + '/', headers);
-        if (!detail.response.ok) continue;
-        const metadata = JSON.parse(detail.text) as AnyRecord;
-        const endpoints = [
-          typeof metadata.xform_link === 'string' ? metadata.xform_link : '',
-          typeof metadata.deployment?.xform_link === 'string' ? metadata.deployment.xform_link : '',
-          base + '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
-          base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
-          base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
-        ].filter(Boolean);
-        for (const endpoint of Array.from(new Set(endpoints))) {
+        diagnostics.push({
+          endpoint: ('asset:' + base).replace(/https?:\/\//, ''),
+          status: detail.response.status,
+          contentType: detail.response.headers.get('content-type') || undefined,
+        });
+        if (detail.response.ok) {
           try {
-            const result = await fetchText(endpoint, headers);
-            if (!result.response.ok) continue;
-            const parsed = parseXForm(result.text);
-            if (parsed.fields.length) return { ...parsed, source: 'Kobo API XForm', resolvedUrl: result.response.url };
+            const metadata = JSON.parse(detail.text) as AnyRecord;
+            const candidates = [
+              typeof metadata.xform_link === 'string' ? metadata.xform_link : '',
+              typeof metadata.downloads?.find === 'function'
+                ? metadata.downloads.find((item: AnyRecord) => /xform/i.test(String(item?.format || item?.type || '')))?.url || ''
+                : '',
+            ].filter(Boolean);
+
+            for (const endpoint of Array.from(new Set(candidates))) {
+              try {
+                const result = await fetchText(endpoint, headers);
+                diagnostics.push({
+                  endpoint: endpoint.replace(/https?:\/\//, ''),
+                  status: result.response.status,
+                  contentType: result.response.headers.get('content-type') || undefined,
+                });
+                if (!result.response.ok) continue;
+                const parsed = parseXForm(result.text);
+                if (parsed.fields.length) {
+                  return { ...parsed, source: 'Kobo API XForm', resolvedUrl: result.response.url || endpoint, diagnostics };
+                }
+              } catch {}
+            }
           } catch {}
         }
       } catch {}
     }
   }
 
-  // /x/<id> is a web-form share identifier, not the v2 Asset UID.
-  // If the public page exposes the questionnaire structure, use the existing
-  // server-side AI extractor; otherwise require the actual Asset UID.
   try {
     const result = await fetchText(url);
-    if (!result.response.ok) return null;
-    const parsed = parseXForm(result.text);
-    if (parsed.fields.length) {
-      return { ...parsed, source: 'Kobo web form XForm', resolvedUrl: result.response.url };
-    }
-    const extracted = await aiJson(
-      'Extract only the questionnaire structure actually present in this KoboToolbox web-form page. Never invent questions, field names, choices, citations, or answers. If the page is only an application shell and does not expose the questionnaire, return an empty fields array.',
-      'Kobo web-form HTML:\n' + clean(result.text).slice(0, 60000),
-      'kobo_form_definition',
-      {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          fields: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                name: { type: 'string' },
-                label: { type: 'string' },
-                type: { type: 'string' },
-                required: { type: 'boolean' },
-                relevant: { type: 'string' },
-                options: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      name: { type: 'string' },
-                      label: { type: 'string' },
+    diagnostics.push({
+      endpoint: 'web-form:' + url.replace(/^https?:\/\//, ''),
+      status: result.response.status,
+      contentType: result.response.headers.get('content-type') || undefined,
+    });
+    if (result.response.ok) {
+      const parsed = parseXForm(result.text);
+      if (parsed.fields.length) {
+        return { ...parsed, source: 'Kobo web form XForm', resolvedUrl: result.response.url || url, diagnostics };
+      }
+      const extracted = await aiJson(
+        'Extract only the questionnaire structure actually present in this KoboToolbox web-form page. Never invent questions, field names, choices, citations, or answers. If the page is only an application shell and does not expose the questionnaire, return an empty fields array.',
+        'Kobo web-form HTML:\n' + clean(result.text).slice(0, 60000),
+        'kobo_form_definition',
+        {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            fields: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  label: { type: 'string' },
+                  type: { type: 'string' },
+                  required: { type: 'boolean' },
+                  relevant: { type: 'string' },
+                  options: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        name: { type: 'string' },
+                        label: { type: 'string' },
+                      },
+                      required: ['name', 'label'],
+                      additionalProperties: false,
                     },
-                    required: ['name', 'label'],
-                    additionalProperties: false,
                   },
                 },
+                required: ['name', 'label', 'type', 'required', 'relevant', 'options'],
+                additionalProperties: false,
               },
-              required: ['name', 'label', 'type', 'required', 'relevant', 'options'],
-              additionalProperties: false,
             },
           },
-        },
-        required: ['title', 'fields'],
-        additionalProperties: false,
+          required: ['title', 'fields'],
+          additionalProperties: false,
+        }
+      );
+      if (extracted?.fields?.length) {
+        return {
+          title: extracted.title || 'KoboToolbox form',
+          fields: extracted.fields,
+          source: 'Kobo web form structured extraction',
+          resolvedUrl: result.response.url || url,
+          diagnostics,
+        };
       }
-    );
-    if (extracted?.fields?.length) {
-      return {
-        title: extracted.title || 'KoboToolbox form',
-        fields: extracted.fields,
-        source: 'Kobo web form structured extraction',
-        resolvedUrl: result.response.url,
-      };
     }
   } catch {}
 
-  return null;
+  return { failure: true, uid, shareId: String(url.match(/\/x\/([A-Za-z0-9_-]+)/i)?.[1] || ''), diagnostics };
 }
-
 function syntheticValue(field: FormField, index: number, recordIndex: number) {
   const prefix = 'SYNTHETIC_TEST_' + String(recordIndex + 1).padStart(3, '0');
   if (field.options?.length) return field.options[(index + recordIndex) % field.options.length].name;
@@ -642,14 +685,28 @@ export default async function handler(req: any, res: any) {
         return;
       }
       const resolved = await inspectKobo(url, String(body.assetUid || ''), String(body.apiToken || ''));
-      if (!resolved) {
+      if (!resolved || (resolved as any).failure) {
+        const failure = resolved as any;
+        const diagnostics = Array.isArray(failure?.diagnostics) ? failure.diagnostics : [];
+        const authRequired = diagnostics.some((item: any) => item.status === 401 || item.status === 403);
+        const notFound = diagnostics.some((item: any) => item.status === 404);
         send(res, 422, {
           reachable: true,
           mapped: false,
+          code: authRequired ? 'KOBO_AUTH_REQUIRED' : notFound && failure?.uid ? 'KOBO_ASSET_NOT_FOUND' : 'KOBO_XFORM_UNAVAILABLE',
           questionCount: 0,
           fields: [],
-          needsAssetUid: !body.assetUid,
-          message: 'Kobo was reached, but FieldMind could not resolve the questionnaire definition. For exact mapping, paste the Kobo project URL or Asset UID. If this is a public /x/ link, keep the link and we will use its resolved XForm when Kobo exposes it.',
+          assetUid: failure?.uid || '',
+          shareId: failure?.shareId || '',
+          needsAssetUid: !failure?.uid,
+          diagnostics,
+          message: authRequired
+            ? 'Kobo requires an API key to read this questionnaire definition. Enter it under Advanced options; it is used only for this inspection and is not saved.'
+            : notFound && failure?.uid
+              ? 'Kobo could not find that Asset UID on the selected server. Check that the Summary URL belongs to the same Kobo server.'
+              : failure?.uid
+                ? 'Kobo exposed the project but FieldMind could not retrieve a usable XForm. Endpoint diagnostics are included.'
+                : 'FieldMind could not resolve the questionnaire definition from this web-form link. Paste the Kobo Summary URL if needed.',
         });
         return;
       }
