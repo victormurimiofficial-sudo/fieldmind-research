@@ -3,7 +3,7 @@ const api = {
   async request(method: string, url: string, body?: unknown) {
     let response: Response;
     try {
-      response = await fetch(url, { method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      response = await fetch(url, { credentials: 'include', method, headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     } catch {
       throw new Error('Could not reach the FieldMind backend. Check the deployment and try again.');
     }
@@ -39,6 +39,11 @@ import {
   Globe2,
   Layers3,
   Link2,
+  LockKeyhole,
+  LogOut,
+  Mail,
+  UserRound,
+  ArrowUpRight,
   Menu,
   MessageSquareText,
   Pencil,
@@ -52,6 +57,8 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+
+type AuthUser = { id: string; email: string; isAdmin: boolean };
 
 type Project = {
   id: string;
@@ -178,7 +185,9 @@ const nav = [
 ];
 
 function App() {
-  const cached = readWorkspaceSnapshot();
+  const cached: Partial<WorkspaceSnapshot> | null = null;
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'guest'>('checking');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [page, setPage] = useState(() => cached?.page || 'overview');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>(() => cached?.projects || []);
@@ -216,10 +225,28 @@ function App() {
   const hasRejectedFields = projectDrafts.some(d => d.fields.some(f => f.status === 'rejected'));
   const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
 
-  // Rehydrate the last workspace immediately, then reconcile with the API.
-  // Cached state is intentionally never cleared just because the backend is
-  // temporarily unavailable. This makes refresh safe during outages.
   useEffect(() => {
+    let alive = true;
+    api.get('/api/auth/me').then(result => {
+      if (!alive) return;
+      setAuthUser(result.data?.user || null);
+      setAuthStatus(result.data?.user ? 'authenticated' : 'guest');
+      if (!result.data?.user && typeof window !== 'undefined') {
+        try { window.localStorage.removeItem(WORKSPACE_STORAGE_KEY); } catch {}
+      }
+    }).catch(() => {
+      if (!alive) return;
+      setAuthUser(null);
+      setAuthStatus('guest');
+      try { window.localStorage.removeItem(WORKSPACE_STORAGE_KEY); } catch {}
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // Reconcile the authenticated user's server workspace. The browser cache is
+  // no longer used as an authority now that multiple users can share a device.
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
     let alive = true;
     const cachedProjectId = selectedProject.id;
     const boot = async () => {
@@ -282,12 +309,10 @@ function App() {
     };
     boot();
     return () => { alive = false; };
-  }, []);
+  }, [authStatus]);
 
-  // Persist the complete user-facing workspace. The Kobo API key is kept
-  // separately in browser localStorage for this single-user test account so
-  // refreshes and new tabs retain the connection without putting the secret
-  // inside project records.
+  // Persist a convenience snapshot for the current browser. The server remains
+  // the source of truth and ownership is enforced by the authenticated API.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -629,10 +654,37 @@ function App() {
     } catch (e) { setToast(e instanceof Error ? e.message : 'Package preparation failed.'); }
   };
 
+  const logout = async () => {
+    try { await api.post('/api/auth/logout'); } catch {}
+    try {
+      window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+      window.localStorage.removeItem(KOBO_TOKEN_STORAGE_KEY);
+    } catch {}
+    setProjects([]);
+    setSources([]);
+    setDrafts([]);
+    setSelectedProject(emptyProject);
+    setFields([]);
+    setKoboUrl('');
+    setKoboToken('');
+    setAuthUser(null);
+    setAuthStatus('guest');
+    setPage('overview');
+    setToast('');
+  };
+
   const navTo = (key: string) => {
     setPage(key);
     setMobileOpen(false);
   };
+
+  if (authStatus === 'checking') {
+    return <div className="auth-loading"><div className="auth-loading-mark"><Sparkles size={20}/></div><strong>FieldMind</strong><span>Preparing your research workspace…</span></div>;
+  }
+
+  if (authStatus === 'guest') {
+    return <LandingPage onAuthenticated={(user) => { setAuthUser(user); setAuthStatus('authenticated'); }} />;
+  }
 
   return (
     <div className="shell">
@@ -697,7 +749,11 @@ function App() {
             <button className="icon-btn" onClick={() => window.location.reload()} aria-label="Refresh workspace" title="Refresh workspace">
               <RefreshCw size={17} />
             </button>
-            <div className="avatar">FM</div>
+            <div className="user-menu">
+              <div className="user-copy"><strong>{authUser?.isAdmin ? 'ADMIN' : 'RESEARCHER'}</strong><span>{authUser?.email}</span></div>
+              <div className="avatar">{authUser?.isAdmin ? 'VM' : String(authUser?.email || 'FM').slice(0,2).toUpperCase()}</div>
+              <button className="icon-btn" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={16}/></button>
+            </div>
           </div>
         </header>
         {backendState !== 'ready' && <div className={'system-banner ' + backendState}><ShieldCheck size={15}/><span>{backendState === 'checking' ? 'Connecting to the research backend…' : 'The backend is unavailable or incompletely configured. Actions are disabled until the connection is restored.'}</span></div>}
@@ -1539,6 +1595,117 @@ function App() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => void }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setMessage('');
+    if (!email.trim() || !password) {
+      setMessage('Enter your email and password.');
+      return;
+    }
+    if (mode === 'signup' && password.length < 8) {
+      setMessage('Use a password of at least 8 characters.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.post('/api/auth/' + mode, {
+        email: email.trim().toLowerCase(),
+        password,
+        name: name.trim(),
+      });
+      if (result.data?.requiresEmailConfirmation) {
+        setMessage(result.data.message || 'Check your email to confirm your account.');
+      } else if (result.data?.user) {
+        onAuthenticated(result.data.user);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Authentication failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="landing">
+      <header className="landing-nav">
+        <div className="landing-brand"><div className="brand-mark"><Sparkles size={17}/></div><div><strong>FieldMind</strong><span>Research Intelligence</span></div></div>
+        <div className="landing-nav-actions">
+          <span className="landing-trust"><ShieldCheck size={14}/> Private research workspaces</span>
+          <button className="landing-login" onClick={() => setMode('signin')}>Sign in</button>
+          <button className="landing-signup" onClick={() => setMode('signup')}>Create account <ArrowUpRight size={14}/></button>
+        </div>
+      </header>
+
+      <main>
+        <section className="landing-hero">
+          <div className="landing-hero-copy">
+            <div className="landing-kicker"><span/> FIELD RESEARCH, BUILT AROUND THE WORK</div>
+            <h1>Research that starts<br/><em>with people.</em></h1>
+            <p>FieldMind brings questionnaires, evidence, field context and quality review into one calm research workspace — so teams can prepare better studies without losing the human side of the work.</p>
+            <div className="landing-actions">
+              <button className="landing-primary" onClick={() => setMode('signup')}>Start a research workspace <ArrowRight size={17}/></button>
+              <button className="landing-secondary" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>See how it works <ChevronRight size={16}/></button>
+            </div>
+            <div className="landing-proof"><div><ShieldCheck size={16}/><span>Human confirmation built in</span></div><div><Database size={16}/><span>Evidence stays with each study</span></div></div>
+          </div>
+          <div className="landing-collage">
+            <div className="image-main"><img src="https://images.unsplash.com/photo-1540479859555-17af45c78602?auto=format&fit=crop&w=1200&q=85" alt="Children learning together"/></div>
+            <div className="image-small image-one"><img src="https://images.unsplash.com/photo-1740741705681-2ac01b194a3f?auto=format&fit=crop&w=700&q=85" alt="Smiling child outdoors"/></div>
+            <div className="image-small image-two"><img src="https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=700&q=85" alt="Childhood joy"/></div>
+            <div className="collage-note"><Sparkles size={15}/><strong>Curiosity → evidence → action</strong><span>Research is more than a dataset.</span></div>
+          </div>
+        </section>
+
+        <section className="landing-story" id="how-it-works">
+          <div className="story-intro"><span className="landing-kicker"><span/> THE FIELD MINDSET</span><h2>Good research should feel <em>alive.</em></h2><p>Behind every questionnaire is a person, a place and a question worth answering. FieldMind is designed to keep those three visible.</p></div>
+          <div className="story-grid">
+            <article><div className="story-number">01</div><h3>Build around the study</h3><p>Each account gets its own private research projects, Kobo connection and evidence library. Your work stays separated from everyone else's.</p></article>
+            <article><div className="story-number">02</div><h3>Ground the preparation</h3><p>Bring documented literature and local evidence into the workspace. The system keeps evidence as context rather than pretending inference is fact.</p></article>
+            <article><div className="story-number">03</div><h3>Keep humans in the loop</h3><p>Generated QA fixtures remain clearly synthetic and require review before export. FieldMind helps test a workflow; it does not turn fiction into participant data.</p></article>
+          </div>
+        </section>
+
+        <section className="landing-photo-strip">
+          <div className="photo-card"><img src="https://images.unsplash.com/photo-1540479859555-17af45c78602?auto=format&fit=crop&w=1000&q=85" alt="Children learning"/><span>Learning</span></div>
+          <div className="photo-card tall"><img src="https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=1000&q=85" alt="Child exploring"/><span>Curiosity</span></div>
+          <div className="photo-card"><img src="https://images.unsplash.com/photo-1740741705681-2ac01b194a3f?auto=format&fit=crop&w=1000&q=85" alt="Smiling child"/><span>Hope</span></div>
+          <div className="photo-quote"><span>FIELD NOTES</span><strong>“The point is not simply to collect answers. It is to understand what they mean.”</strong></div>
+        </section>
+
+        <section className="landing-cta">
+          <div><span className="landing-kicker"><span/> READY WHEN THE STUDY IS</span><h2>Bring the next question<br/>into the field.</h2></div>
+          <button className="landing-primary" onClick={() => setMode('signup')}>Create your account <ArrowRight size={17}/></button>
+        </section>
+      </main>
+
+      <footer className="landing-footer"><span>© {new Date().getFullYear()} FieldMind Research</span><span>Research workspace · Human review · Evidence grounded</span></footer>
+
+      <div className="auth-overlay">
+        <div className="auth-card">
+          <div className="auth-card-top"><div className="auth-mini-mark"><Sparkles size={16}/></div><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create account' : 'Sign in'}</button></div>
+          <div className="auth-heading"><span className="landing-kicker"><span/> {mode === 'signin' ? 'WELCOME BACK' : 'JOIN FIELDMIND'}</span><h2>{mode === 'signin' ? 'Your research, ready.' : 'Start your private workspace.'}</h2><p>{mode === 'signin' ? 'Sign in to continue to your studies and evidence.' : 'Every account gets an isolated research workspace.'}</p></div>
+          <form onSubmit={submit}>
+            {mode === 'signup' && <label><UserRound size={15}/> Full name<input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name"/></label>}
+            <label><Mail size={15}/> Email<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"/></label>
+            <label><LockKeyhole size={15}/> Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}/></label>
+            {message && <div className="auth-message">{message}</div>}
+            <button className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in to FieldMind' : 'Create my workspace'} <ArrowRight size={16}/></button>
+          </form>
+          <p className="auth-foot">{mode === 'signin' ? "New here? " : "Already have an account? "}<button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create an account' : 'Sign in instead'}</button></p>
+        </div>
+      </div>
     </div>
   );
 }
