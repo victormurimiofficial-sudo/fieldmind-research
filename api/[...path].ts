@@ -786,7 +786,7 @@ export default async function handler(req: any, res: any) {
         (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)
       );
       const ai = Boolean(process.env.OPENAI_API_KEY);
-      send(res, 200, { ok: database && ai, database: database ? 'configured' : 'missing', ai: ai ? 'configured' : 'missing' });
+      send(res, 200, { ok: database, database: database ? 'configured' : 'missing', ai: ai ? 'configured' : 'optional-local-fallback' });
       return;
     }
 
