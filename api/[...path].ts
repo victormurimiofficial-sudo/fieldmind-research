@@ -735,16 +735,24 @@ export default async function handler(req: any, res: any) {
       const sources = Array.isArray(body.sources) ? body.sources : [];
       const output: Draft[] = [];
 
-      for (const batch of chunks(count, 20)) {
-        const aiOutput = await generate(
-          project,
-          fields,
-          batch,
-          String(body.ageMix || ''),
-          String(body.majority || ''),
-          sources
-        );
+      // Run independent 20-record AI batches in parallel so a 100-record
+      // compile uses five concurrent model calls instead of five sequential calls.
+      const batches = chunks(count, 20);
+      const batchOutputs = await Promise.all(
+        batches.map(batch =>
+          generate(
+            project,
+            fields,
+            batch,
+            String(body.ageMix || ''),
+            String(body.majority || ''),
+            sources
+          )
+        )
+      );
 
+      batchOutputs.forEach((aiOutput, batchIndex) => {
+        const batch = batches[batchIndex];
         batch.forEach((recordIndex, offset) => {
           const generated = aiOutput?.drafts?.[offset];
           const map = new Map(
@@ -772,7 +780,7 @@ export default async function handler(req: any, res: any) {
             status: 'review',
           });
         });
-      }
+      });
 
       const ids = await insert('drafts', output as AnyRecord[]);
       send(res, 200, {
