@@ -39,6 +39,7 @@ import {
   Link2,
   Menu,
   MessageSquareText,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -135,6 +136,10 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [toast, setToast] = useState('');
   const [showNewProject, setShowNewProject] = useState(false);
+  const [editingDraft, setEditingDraft] = useState<Draft | null>(null);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [showSourceModal, setShowSourceModal] = useState(false);
+  const [newSource, setNewSource] = useState({ title: '', facility: '', year: String(new Date().getFullYear()), type: 'Literature', finding: '' });
   const [newProject, setNewProject] = useState({
     name: '',
     location: '',
@@ -349,16 +354,25 @@ function App() {
     }
   };
 
-  const editDraft = async (draft: Draft) => {
-    const raw = window.prompt('Edit fixture values as JSON', JSON.stringify(Object.fromEntries(draft.fields.map(f => [f.name, f.value])), null, 2));
-    if (!raw) return;
-    try {
-      const values = JSON.parse(raw) as Record<string, string>;
-      const updated = { ...draft, status: 'review' as const, fields: draft.fields.map(f => ({ ...f, value: values[f.name] === undefined ? f.value : String(values[f.name]), status: 'review' as const })) };
-      await updateDraft(updated, 'Changes saved. The record returned to review.');
-    } catch {
-      setToast('Invalid JSON. No changes were saved.');
-    }
+  const editDraft = (draft: Draft) => {
+    setEditingDraft(draft);
+    setEditValues(Object.fromEntries(draft.fields.map(f => [f.name, f.value])));
+  };
+
+  const saveEditedDraft = async () => {
+    if (!editingDraft) return;
+    const updated = {
+      ...editingDraft,
+      status: 'review' as const,
+      fields: editingDraft.fields.map(f => ({
+        ...f,
+        value: editValues[f.name] === undefined ? f.value : String(editValues[f.name]),
+        status: 'review' as const,
+      })),
+    };
+    await updateDraft(updated, 'Changes saved. The record returned to review.');
+    setEditingDraft(null);
+    setEditValues({});
   };
 
   const selectProject = async (project: Project) => {
@@ -375,20 +389,30 @@ function App() {
     }
   };
 
-  const addSource = async () => {
+  const addSource = () => {
     if (!selectedProject.id) { setToast('Create or select a project first.'); return; }
-    const title = window.prompt('Source title');
-    if (!title?.trim()) return;
-    const facility = window.prompt('Facility / area', selectedProject.location || '') || '';
-    const yearRaw = window.prompt('Publication year', String(new Date().getFullYear()));
-    const type = window.prompt('Source type', 'Literature') || 'Literature';
-    const finding = window.prompt('Key documented finding / note');
-    if (!finding?.trim()) return;
+    setNewSource({ title: '', facility: selectedProject.location || '', year: String(new Date().getFullYear()), type: 'Literature', finding: '' });
+    setShowSourceModal(true);
+  };
+
+  const saveSource = async () => {
+    if (!selectedProject.id || !newSource.title.trim() || !newSource.finding.trim()) {
+      setToast('Add a source title and documented finding.');
+      return;
+    }
     try {
-      const result = await api.post('/api/sources', { projectId: selectedProject.id, title: title.trim(), facility: facility.trim(), year: Number(yearRaw) || new Date().getFullYear(), type: type.trim(), finding: finding.trim() });
+      const result = await api.post('/api/sources', {
+        projectId: selectedProject.id,
+        title: newSource.title.trim(),
+        facility: newSource.facility.trim(),
+        year: Number(newSource.year) || new Date().getFullYear(),
+        type: newSource.type.trim() || 'Literature',
+        finding: newSource.finding.trim(),
+      });
       setSources(all => [result.data.source, ...all]);
       setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, researchCount: (p.researchCount || 0) + 1 } : p));
       setSelectedProject(p => ({ ...p, researchCount: (p.researchCount || 0) + 1 }));
+      setShowSourceModal(false);
       setToast('Evidence source saved.');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'Source could not be saved.');
@@ -505,8 +529,8 @@ function App() {
             </h1>
           </div>
           <div className="top-actions">
-            <button className="icon-btn">
-              <MessageSquareText size={18} />
+            <button className="icon-btn" onClick={() => window.location.reload()} aria-label="Refresh workspace" title="Refresh workspace">
+              <RefreshCw size={17} />
             </button>
             <div className="avatar">FM</div>
           </div>
@@ -549,6 +573,27 @@ function App() {
               <div className="hero-visual">
                 <div className="orb orb-one" />
                 <div className="orb orb-two" />
+                <div className="field-illustration" aria-label="Illustrated research workflow">
+                  <div className="map-grid" />
+                  <div className="route-line route-a" />
+                  <div className="route-line route-b" />
+                  <div className="pin pin-a"><span /></div>
+                  <div className="pin pin-b"><span /></div>
+                  <div className="researcher">
+                    <div className="researcher-head" />
+                    <div className="researcher-body" />
+                    <div className="researcher-arm" />
+                  </div>
+                  <div className="phone-card">
+                    <div className="phone-speaker" />
+                    <div className="phone-screen">
+                      <span className="screen-label">FIELD CHECK</span>
+                      <strong>{fields.length || '—'}</strong>
+                      <small>questions mapped</small>
+                      <i><b /></i>
+                    </div>
+                  </div>
+                </div>
                 <div className="research-card">
                   <div className="mini-top">
                     <span>
@@ -1189,6 +1234,53 @@ function App() {
               </div>
             </div>
           </section>
+        )}
+
+        {editingDraft && (
+          <div className="modal-backdrop" onClick={() => setEditingDraft(null)}>
+            <div className="modal edit-modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <p className="eyebrow">EDIT FIXTURE</p>
+                  <h3>Review synthetic record</h3>
+                </div>
+                <button onClick={() => setEditingDraft(null)}><X size={18} /></button>
+              </div>
+              <div className="edit-note"><ShieldCheck size={15} /> This is a synthetic QA fixture. Editing returns every field to review status.</div>
+              <div className="edit-fields">
+                {editingDraft.fields.map(field => (
+                  <label key={field.name}>
+                    {field.label}
+                    <span className="edit-field-name">{field.name}</span>
+                    <textarea value={editValues[field.name] ?? field.value} onChange={e => setEditValues(v => ({ ...v, [field.name]: e.target.value }))} />
+                  </label>
+                ))}
+              </div>
+              <button className="primary full" onClick={saveEditedDraft}><Check size={16} /> Save changes</button>
+            </div>
+          </div>
+        )}
+
+        {showSourceModal && (
+          <div className="modal-backdrop" onClick={() => setShowSourceModal(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <p className="eyebrow">EVIDENCE LIBRARY</p>
+                  <h3>Add research source</h3>
+                </div>
+                <button onClick={() => setShowSourceModal(false)}><X size={18} /></button>
+              </div>
+              <label>Source title<input value={newSource.title} onChange={e => setNewSource(v => ({ ...v, title: e.target.value }))} placeholder="Paper, report or official source" /></label>
+              <div className="form-two">
+                <label>Facility / area<input value={newSource.facility} onChange={e => setNewSource(v => ({ ...v, facility: e.target.value }))} placeholder="Area or facility" /></label>
+                <label>Year<input type="number" value={newSource.year} onChange={e => setNewSource(v => ({ ...v, year: e.target.value }))} /></label>
+              </div>
+              <label>Source type<select value={newSource.type} onChange={e => setNewSource(v => ({ ...v, type: e.target.value }))}><option>Literature</option><option>Official report</option><option>Local evidence</option><option>Guideline</option><option>Other</option></select></label>
+              <label>Documented finding<textarea value={newSource.finding} onChange={e => setNewSource(v => ({ ...v, finding: e.target.value }))} placeholder="Record only what the source actually documents." /></label>
+              <button className="primary full" onClick={saveSource}><Plus size={16} /> Save source</button>
+            </div>
+          </div>
         )}
 
         {showNewProject && (
