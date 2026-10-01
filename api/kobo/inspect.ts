@@ -130,7 +130,16 @@ async function inspect(url: string, source: string, token: string) {
   const uid = uidFrom(source) || uidFrom(url);
   const auth = token || process.env.KOBO_API_TOKEN || '';
   const headers = auth ? { Authorization: 'Token ' + auth } : {};
-  const bases = ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
+  const inputHost = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
+  const preferred = inputHost === 'ee.kobotoolbox.org' ? 'https://eu.kobotoolbox.org'
+    : inputHost === 'eu.kobotoolbox.org' ? 'https://eu.kobotoolbox.org'
+    : inputHost === 'kf.kobotoolbox.org' ? 'https://kf.kobotoolbox.org'
+    : '';
+  const bases = Array.from(new Set([
+    preferred,
+    'https://eu.kobotoolbox.org',
+    'https://kf.kobotoolbox.org',
+  ].filter(Boolean)));
 
   if (uid) {
     for (const base of bases) {
@@ -141,8 +150,13 @@ async function inspect(url: string, source: string, token: string) {
         const candidates = [
           typeof metadata.xform_link === 'string' ? metadata.xform_link : '',
           typeof metadata.deployment?.xform_link === 'string' ? metadata.deployment.xform_link : '',
+          typeof metadata.downloads?.find === 'function'
+            ? metadata.downloads.find((item: AnyRecord) => item?.format === 'xform')?.url || ''
+            : '',
+          base + '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
           base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
           base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
+          base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/?format=xml',
         ].filter(Boolean);
 
         for (const endpoint of Array.from(new Set(candidates))) {
@@ -154,6 +168,25 @@ async function inspect(url: string, source: string, token: string) {
           } catch {}
         }
       } catch {}
+    }
+  }
+
+  // The /x/{id} share URL is an Enketo web-form shell. If the API is unavailable,
+  // also try the server's XML form endpoints using the UID extracted above.
+  if (uid) {
+    for (const base of bases) {
+      for (const endpoint of [
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '.xml',
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform/',
+        base + '/api/v2/assets/' + encodeURIComponent(uid) + '/xform.xml',
+      ]) {
+        try {
+          const result = await fetchText(endpoint, headers);
+          if (!result.response.ok) continue;
+          const parsed = parseXForm(result.text);
+          if (parsed.fields.length) return { ...parsed, source: 'Kobo XML form endpoint', resolvedUrl: result.response.url };
+        } catch {}
+      }
     }
   }
 
