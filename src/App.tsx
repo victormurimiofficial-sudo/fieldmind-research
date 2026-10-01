@@ -252,7 +252,7 @@ function App() {
     const boot = async () => {
       try {
         const health = await api.get('/api/_healthcheck');
-        if (!health.data?.ok || health.data?.database !== 'configured' || health.data?.ai !== 'configured') {
+        if (!health.data?.ok || health.data?.database !== 'configured') {
           throw new Error('Backend configuration is incomplete.');
         }
 
