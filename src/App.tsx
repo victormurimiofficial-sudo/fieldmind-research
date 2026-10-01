@@ -457,7 +457,7 @@ function App() {
     if (!koboState.checked || !fields.length) { setToast('Inspect the Kobo form first. Generation is blocked without mapped questions.'); return; }
     setIsGenerating(true);
     try {
-      const result = await api.post('/api/ai/drafts', {
+      const result = await api.post('/api/brain', {
         project: selectedProject,
         sources,
         fields,
@@ -472,7 +472,7 @@ function App() {
       setProjects(all => all.map(p => p.id === selectedProject.id ? { ...p, draftCount: (p.draftCount || 0) + incoming.length } : p));
       setSelectedProject(p => ({ ...p, draftCount: (p.draftCount || 0) + incoming.length }));
       setPage('review');
-      setToast(incoming.length + ' complete synthetic QA records created.');
+      setToast(incoming.length + ' synthetic QA fixtures prepared, validated and sent to review.');
     } catch (e) {
       setToast(e instanceof Error ? e.message : 'AI generation failed. Try again.');
     } finally {
