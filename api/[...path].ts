@@ -866,7 +866,7 @@ export default async function handler(req: any, res: any) {
     const draftMatch = path.match(/^\/api\/drafts\/([^/]+)$/);
     if (draftMatch && req.method === 'PUT') {
       const id = draftMatch[1];
-      const ok = await update(id, { ...body, id });
+      const ok = await update(id, { ...body, id }, authUser!);
       send(res, ok ? 200 : 404, { draft: { ...body, id } });
       return;
     }
@@ -1043,7 +1043,7 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === 'POST' && path === '/api/drafts/export') {
       const projectId = String(body.projectId || '');
-      const items = (await list<Draft>('drafts', 500)).filter(draft => draft.projectId === projectId);
+      const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
 
       if (!items.length) {
         send(res, 400, { message: 'No records found for this project' });
