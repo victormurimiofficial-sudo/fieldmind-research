@@ -1228,14 +1228,16 @@ export default async function handler(req: any, res: any) {
       }
 
       const project = (await list<AnyRecord>('projects', authUser!, 500)).find(item => String(item.id) === projectId);
-      const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
+      const items = (await list<Draft>('drafts', authUser!, 500)).filter(
+        draft => draft.projectId === projectId && !draft.testSubmission
+      );
 
       if (!projectId || !project) {
         send(res, 404, { message: 'Project not found.' });
         return;
       }
       if (!items.length) {
-        send(res, 400, { message: 'No synthetic QA fixtures found for this project.' });
+        send(res, 409, { message: 'There are no new synthetic QA fixtures waiting for Kobo submission. Generate another QA batch if you want to run the test again.' });
         return;
       }
       if (items.some(draft => draft.mode !== 'synthetic')) {
