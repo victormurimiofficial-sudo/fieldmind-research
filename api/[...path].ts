@@ -420,6 +420,59 @@ async function inspectKobo(url: string, source: string, token: string) {
   // The /x/<id> value is an Enketo share/form ID, not a KPI asset UID.
   // Resolve it through the authenticated v2 asset list before falling back to
   // scraping the public form shell. This is the reliable path for private forms.
+  // If a direct XForm URL returns 404, verify the UID through the
+  // authenticated survey list and use Kobo's canonical xform_link/download
+  // URLs from the asset serializer.
+  if (uid && auth) {
+    for (const base of bases) {
+      try {
+        const listEndpoint = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const listResult = await fetchText(listEndpoint, headers);
+        diagnostics.push({
+          endpoint: ('assets-list-for-uid:' + base).replace(/^https?:\/\//, ''),
+          status: listResult.response.status,
+          contentType: listResult.response.headers.get('content-type') || undefined,
+        });
+        if (!listResult.response.ok) continue;
+
+        const listData = JSON.parse(listResult.text) as AnyRecord;
+        const results = Array.isArray(listData?.results) ? listData.results : [];
+        const match = results.find(item => String(item?.uid || '') === uid);
+        if (!match) continue;
+
+        const links: string[] = [
+          typeof match?.xform_link === 'string' ? match.xform_link : '',
+          ...(Array.isArray(match?.downloads)
+            ? match.downloads
+                .filter((item: AnyRecord) => /xform|xml/i.test(String(item?.format || item?.type || '')))
+                .map((item: AnyRecord) => String(item?.url || ''))
+            : []),
+        ].filter(Boolean);
+
+        for (const endpoint of Array.from(new Set(links))) {
+          try {
+            const xform = await fetchText(endpoint, headers);
+            diagnostics.push({
+              endpoint: endpoint.replace(/^https?:\/\//, ''),
+              status: xform.response.status,
+              contentType: xform.response.headers.get('content-type') || undefined,
+            });
+            if (!xform.response.ok) continue;
+            const parsed = parseXForm(xform.text);
+            if (parsed.fields.length) {
+              return {
+                ...parsed,
+                source: 'Kobo API XForm',
+                resolvedUrl: xform.response.url || endpoint,
+                diagnostics,
+              };
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
   const shareId = String(url.match(/\/x\/([A-Za-z0-9_-]+)/i)?.[1] || '');
   if (!uid && shareId && auth) {
     for (const base of bases) {
@@ -796,7 +849,7 @@ export default async function handler(req: any, res: any) {
           needsAssetUid: !failure?.uid,
           diagnostics,
           message: authRequired
-            ? 'Kobo requires an API key to read this questionnaire definition. Enter it under Advanced options; it is used only for this inspection and is not saved.'
+            ? 'Kobo requires an API key to read this questionnaire definition. Enter it under Advanced options.'
             : notFound && failure?.uid
               ? 'Kobo could not find that Asset UID on the selected server. Check that the Summary URL belongs to the same Kobo server.'
               : failure?.uid
