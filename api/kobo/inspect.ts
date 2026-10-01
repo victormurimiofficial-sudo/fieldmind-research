@@ -303,6 +303,45 @@ async function inspect(url: string, source: string, token: string) {
     }
   }
 
+  // A /x/<id> share link does not expose the v2 Asset UID in the URL.
+  // When the user supplies their Kobo API key, give them a safe project picker
+  // from the surveys they are actually allowed to access instead of making
+  // them understand Kobo's internal identifiers.
+  if (!uid && shareId && auth) {
+    for (const base of bases) {
+      try {
+        const result = await fetchText(
+          base + '/api/v2/assets/?asset_type=survey&limit=100',
+          headers
+        );
+        statuses.push({
+          endpoint: ('assets-list:' + base).replace(/https?:\\/\\//, ''),
+          status: result.response.status,
+          contentType: result.response.headers.get('content-type') || undefined,
+        });
+        if (!result.response.ok) continue;
+        const data = JSON.parse(result.text) as AnyRecord;
+        const results = Array.isArray(data?.results) ? data.results : [];
+        const candidates = results
+          .map((item: AnyRecord) => ({
+            uid: String(item?.uid || ''),
+            name: String(item?.name || item?.settings?.name || item?.title || '').trim(),
+            url: String(item?.url || '').trim(),
+          }))
+          .filter((item: AnyRecord) => item.uid && item.name);
+        if (candidates.length) {
+          return {
+            needsSelection: true,
+            candidates,
+            shareId,
+            source: 'Kobo API project list',
+            statuses,
+          };
+        }
+      } catch {}
+    }
+  }
+
   // A /x/<id> value is a web-form share identifier, not the v2 Asset UID.
   // It is still a valid one-link input: try the public web form itself.
   try {
@@ -361,7 +400,20 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const resolved = await inspect(url, source, token);
+    let resolved = await inspect(url, source, token);
+    if ((resolved as any)?.needsSelection) {
+      send(res, 200, {
+        reachable: true,
+        mapped: false,
+        needsSelection: true,
+        shareId: (resolved as any).shareId || '',
+        candidates: (resolved as any).candidates || [],
+        questionCount: 0,
+        fields: [],
+        message: 'This /x/ link is valid, but Kobo identifies the project separately from the share link. Select the matching project below; FieldMind will then retrieve its XForm automatically.',
+      });
+      return;
+    }
     if (!resolved || (resolved as any).failure) {
       const failure = resolved as any;
       const statuses = Array.isArray(failure?.statuses) ? failure.statuses : [];
