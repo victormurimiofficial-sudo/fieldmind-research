@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 const api = {
   async request(method: string, url: string, body?: unknown) {
     let response: Response;
@@ -654,6 +654,25 @@ function App() {
     } catch (e) { setToast(e instanceof Error ? e.message : 'Package preparation failed.'); }
   };
 
+  const resetWorkspace = async () => {
+    if (!authUser?.isAdmin) return;
+    if (!window.confirm('Clear every existing FieldMind research project, source and draft? This cannot be undone.')) return;
+    try {
+      await api.post('/api/admin/reset-workspace');
+      setProjects([]);
+      setSources([]);
+      setDrafts([]);
+      setSelectedProject(emptyProject);
+      setFields([]);
+      setKoboUrl('');
+      setKoboState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+      try { window.localStorage.removeItem(WORKSPACE_STORAGE_KEY); } catch {}
+      setToast('Workspace cleared. FieldMind is ready for the first real research project.');
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : 'Could not clear the workspace.');
+    }
+  };
+
   const logout = async () => {
     try { await api.post('/api/auth/logout'); } catch {}
     try {
@@ -750,6 +769,7 @@ function App() {
               <RefreshCw size={17} />
             </button>
             <div className="user-menu">
+              {authUser?.isAdmin && <button className="admin-clear" onClick={resetWorkspace} title="Clear all existing research">Reset old workspace</button>}
               <div className="user-copy"><strong>{authUser?.isAdmin ? 'ADMIN' : 'RESEARCHER'}</strong><span>{authUser?.email}</span></div>
               <div className="avatar">{authUser?.isAdmin ? 'VM' : String(authUser?.email || 'FM').slice(0,2).toUpperCase()}</div>
               <button className="icon-btn" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={16}/></button>
@@ -1608,7 +1628,7 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
-  const submit = async (event: React.FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     setMessage('');
     if (!email.trim() || !password) {
