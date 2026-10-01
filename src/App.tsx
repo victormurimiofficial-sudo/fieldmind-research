@@ -112,15 +112,30 @@ const emptyProject: Project = {
 
 
 const WORKSPACE_STORAGE_KEY = 'fieldmind:workspace:v2';
-const KOBO_TOKEN_SESSION_KEY = 'fieldmind:kobo-token:v1';
+const KOBO_TOKEN_STORAGE_KEY = 'fieldmind:kobo-token:v2';
 
-function readKoboTokenSession() {
+function readKoboTokenStorage() {
   if (typeof window === 'undefined') return '';
   try {
-    return window.sessionStorage.getItem(KOBO_TOKEN_SESSION_KEY) || '';
+    const saved = window.localStorage.getItem(KOBO_TOKEN_STORAGE_KEY) || '';
+    if (saved) return saved;
+    // Migrate the previous tab-scoped token once.
+    const legacy = window.sessionStorage.getItem('fieldmind:kobo-token:v1') || '';
+    if (legacy) {
+      window.localStorage.setItem(KOBO_TOKEN_STORAGE_KEY, legacy);
+      return legacy;
+    }
+    return '';
   } catch {
     return '';
   }
+}
+
+function writeKoboTokenStorage(value: string) {
+  try {
+    if (value) window.localStorage.setItem(KOBO_TOKEN_STORAGE_KEY, value);
+    else window.localStorage.removeItem(KOBO_TOKEN_STORAGE_KEY);
+  } catch {}
 }
 
 type WorkspaceSnapshot = {
@@ -172,7 +187,7 @@ function App() {
   const [selectedProject, setSelectedProject] = useState<Project>(() => cached?.selectedProject || emptyProject);
   const [fields, setFields] = useState<FormField[]>(() => cached?.fields || []);
   const [koboUrl, setKoboUrl] = useState(() => cached?.koboUrl || cached?.selectedProject?.koboUrl || '');
-  const [koboToken, setKoboToken] = useState(() => readKoboTokenSession());
+  const [koboToken, setKoboToken] = useState(() => readKoboTokenStorage());
   const [showKoboToken, setShowKoboToken] = useState(false);
   const [koboState, setKoboState] = useState(() => cached?.koboState || { checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
   const [koboCandidates, setKoboCandidates] = useState(() => cached?.koboCandidates || []);
@@ -888,8 +903,7 @@ function App() {
                         const value = e.target.value;
                         setKoboToken(value);
                         try {
-                          if (value) window.sessionStorage.setItem(KOBO_TOKEN_SESSION_KEY, value);
-                          else window.sessionStorage.removeItem(KOBO_TOKEN_SESSION_KEY);
+                          writeKoboTokenStorage(value);
                         } catch {}
                       }}
                       placeholder="Paste your current Kobo API key"
@@ -907,7 +921,7 @@ function App() {
                       <span>{showKoboToken ? "Hide" : "Show"}</span>
                     </button>
                   </div>
-                  <p className="field-help">The key is kept only in this browser tab session so a refresh does not make you paste it again. It is not stored with the project and is sent only to FieldMind’s inspection endpoint.</p>
+                  <p className="field-help">The key is saved only in this browser so refreshes and new tabs keep the test-account connection. It is not stored in the project records and is sent only to FieldMind’s Kobo inspection endpoint.</p>
                 </details>
                 <div className="connection-result">
                   <span
@@ -1067,15 +1081,19 @@ function App() {
                 <p className="field-help">Paste one Kobo link. FieldMind detects the server and Asset UID automatically, then retrieves the deployed XForm.</p>
                 <details className="kobo-advanced">
                   <summary>Advanced: private Kobo form / API key</summary>
-                  <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
+                  <label className="field-label">Kobo API key <span>saved on this browser for the test account</span></label>
                   <input
                     type="password"
                     value={koboToken}
-                    onChange={e => setKoboToken(e.target.value)}
+                    onChange={e => {
+                      const value = e.target.value;
+                      setKoboToken(value);
+                      writeKoboTokenStorage(value);
+                    }}
                     placeholder="Paste your current Kobo API key"
-                    autoComplete="off"
+                    autoComplete="new-password"
                   />
-                  <p className="field-help">Kobo's current API requires a token for API requests. The key is sent only to FieldMind's inspection endpoint and is never stored with the project.</p>
+                  <p className="field-help">For this single-user test workspace, the key is saved in this browser so you do not need to paste it after refresh. It is never stored with the project record.</p>
                 </details>
                 <div className="field-map">
                   <div className="field-map-head">
