@@ -318,6 +318,60 @@ async function inspect(url: string, source: string, token: string) {
     }
   }
 
+  // Some Kobo deployments return 404 for a direct XForm download even though
+  // the authenticated asset is accessible. Verify the UID through the official
+  // survey list and use the XForm link exposed by the asset serializer as a
+  // second, authoritative resolution path.
+  if (uid && auth) {
+    for (const base of bases) {
+      try {
+        const listEndpoint = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const result = await fetchText(listEndpoint, headers);
+        statuses.push({
+          endpoint: ('assets-list-for-uid:' + base).replace(/^https?:\/\//, ''),
+          status: result.response.status,
+          contentType: result.response.headers.get('content-type') || undefined,
+        });
+        if (!result.response.ok) continue;
+
+        const data = JSON.parse(result.text) as AnyRecord;
+        const results = Array.isArray(data?.results) ? data.results : [];
+        const match = results.find(item => String(item?.uid || '') === uid);
+        if (!match) continue;
+
+        const links: string[] = [
+          typeof match?.xform_link === 'string' ? match.xform_link : '',
+          ...(Array.isArray(match?.downloads)
+            ? match.downloads
+                .filter((item: AnyRecord) => /xform|xml/i.test(String(item?.format || item?.type || '')))
+                .map((item: AnyRecord) => String(item?.url || ''))
+            : []),
+        ].filter(Boolean);
+
+        for (const endpoint of Array.from(new Set(links))) {
+          try {
+            const xform = await fetchText(endpoint, headers);
+            statuses.push({
+              endpoint: endpoint.replace(/^https?:\/\//, ''),
+              status: xform.response.status,
+              contentType: xform.response.headers.get('content-type') || undefined,
+            });
+            if (!xform.response.ok) continue;
+
+            const parsed = parseXForm(xform.text);
+            if (parsed.fields.length) {
+              return {
+                ...parsed,
+                source: 'Kobo API XForm',
+                resolvedUrl: xform.response.url || endpoint,
+              };
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
   // A /x/<id> share link does not expose the v2 Asset UID in the URL.
   // When the user supplies their Kobo API key, give them a safe project picker
   // from the surveys they are actually allowed to access instead of making
@@ -496,7 +550,7 @@ export default async function handler(req: any, res: any) {
         needsAssetUid: !failure?.uid,
         diagnostics: statuses,
         message: authRequired
-          ? 'Kobo requires an API key to read this questionnaire definition. Enter the Kobo API key in Advanced options; it is used only for this inspection and is not saved.'
+          ? 'Kobo requires an API key to read this questionnaire definition. Enter the Kobo API key in Advanced options.'
           : notFound && failure?.uid
             ? 'Kobo could not find that Asset UID on the selected server. Check that the Summary URL belongs to the same Kobo server.'
             : failure?.uid
