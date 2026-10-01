@@ -284,9 +284,10 @@ function App() {
     return () => { alive = false; };
   }, []);
 
-  // Persist the complete user-facing workspace, but never persist the Kobo API
-  // token. localStorage is used as a local cache so a refresh can restore the
-  // exact screen even when the backend is unavailable.
+  // Persist the complete user-facing workspace. The Kobo API key is kept
+  // separately in browser localStorage for this single-user test account so
+  // refreshes and new tabs retain the connection without putting the secret
+  // inside project records.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
