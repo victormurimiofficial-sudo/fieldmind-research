@@ -1641,7 +1641,8 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
     }
     setBusy(true);
     try {
-      const result = await api.post('/api/auth/' + mode, {
+      const authEndpoint = mode === 'signin' ? '/api/auth/login' : '/api/auth/signup';
+      const result = await api.post(authEndpoint, {
         email: email.trim().toLowerCase(),
         password,
         name: name.trim(),
