@@ -1,0 +1,59 @@
+/* FieldMind brand refinement
+   Uses the approved transparent FM mark and removes decorative AI-template sparkle treatment. */
+.brand-mark,
+.auth-mini-mark {
+  background-color: transparent !important;
+  background-image: url('/fieldmind-logo-v2.svg') !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: contain !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.brand-mark svg,
+.auth-mini-mark svg { display: none !important; }
+
+.landing-marquee i { display: none !important; }
+
+.collage-note {
+  grid-template-columns: 1fr !important;
+}
+.collage-note svg { display: none !important; }
+.collage-note strong {
+  font-size: 0 !important;
+}
+.collage-note strong::after {
+  content: 'People, questions, evidence';
+  font-size: 9px;
+  letter-spacing: 0;
+}
+.collage-note span { grid-column: 1 !important; }
+
+.platform-card:nth-child(3) .platform-icon {
+  background-color: #edf3e7 !important;
+  background-image: url('/fieldmind-logo-v2.svg') !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: 70% !important;
+}
+.platform-card:nth-child(3) .platform-icon svg,
+.ai-pill svg { display: none !important; }
+
+.landing-brand .brand-mark {
+  flex: 0 0 34px;
+  background-size: 32px 32px !important;
+}
+.footer-brand .brand-mark {
+  flex-basis: 34px;
+}
+.auth-mini-mark {
+  width: 38px !important;
+  height: 38px !important;
+}
+
+@media (max-width: 720px) {
+  .landing-marquee {
+    justify-content: flex-start;
+    gap: 24px;
+  }
+}
