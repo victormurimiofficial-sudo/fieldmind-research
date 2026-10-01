@@ -1628,6 +1628,12 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
+  const openAuth = (nextMode: 'signin' | 'signup') => {
+    setMode(nextMode);
+    setMessage('');
+    setShowAuth(true);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setMessage('');
@@ -1662,61 +1668,152 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
   return (
     <div className="landing">
       <header className="landing-nav">
-        <div className="landing-brand"><div className="brand-mark"><Sparkles size={17}/></div><div><strong>FieldMind</strong><span>Research Intelligence</span></div></div>
+        <a className="landing-brand" href="#top" aria-label="FieldMind home">
+          <div className="brand-mark"><Sparkles size={17}/></div>
+          <div><strong>FieldMind</strong><span>Research Intelligence</span></div>
+        </a>
+        <nav className="landing-links" aria-label="Main navigation">
+          <button onClick={() => document.getElementById('platform')?.scrollIntoView({behavior:'smooth'})}>Platform</button>
+          <button onClick={() => document.getElementById('method')?.scrollIntoView({behavior:'smooth'})}>Method</button>
+          <button onClick={() => document.getElementById('stories')?.scrollIntoView({behavior:'smooth'})}>Field stories</button>
+        </nav>
         <div className="landing-nav-actions">
           <span className="landing-trust"><ShieldCheck size={14}/> Private research workspaces</span>
-          <button className="landing-login" onClick={() => { setMode('signin'); setShowAuth(true); }}>Sign in</button>
-          <button className="landing-signup" onClick={() => { setMode('signup'); setShowAuth(true); }}>Create account <ArrowUpRight size={14}/></button>
+          <button className="landing-login" onClick={() => openAuth('signin')}>Sign in</button>
+          <button className="landing-signup" onClick={() => openAuth('signup')}>Create account <ArrowUpRight size={14}/></button>
         </div>
       </header>
 
-      <main>
+      <main id="top">
         <section className="landing-hero">
           <div className="landing-hero-copy">
-            <div className="landing-kicker"><span/> FIELD RESEARCH, BUILT AROUND THE WORK</div>
-            <h1>Research that starts<br/><em>with people.</em></h1>
-            <p>FieldMind brings questionnaires, evidence, field context and quality review into one calm research workspace — so teams can prepare better studies without losing the human side of the work.</p>
+            <div className="landing-kicker"><span/> RESEARCH, WITH THE HUMAN PART LEFT IN</div>
+            <h1>Ask better.<br/><em>Understand deeper.</em></h1>
+            <p>FieldMind gives research teams one private place to connect questionnaires, evidence, field context and quality review — from the first question to the final handoff.</p>
             <div className="landing-actions">
-              <button className="landing-primary" onClick={() => { setMode('signup'); setShowAuth(true); }}>Start a research workspace <ArrowRight size={17}/></button>
-              <button className="landing-secondary" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>See how it works <ChevronRight size={16}/></button>
+              <button className="landing-primary" onClick={() => openAuth('signup')}>Build a research workspace <ArrowRight size={17}/></button>
+              <button className="landing-secondary" onClick={() => document.getElementById('platform')?.scrollIntoView({behavior:'smooth'})}>Explore FieldMind <ChevronRight size={16}/></button>
             </div>
-            <div className="landing-proof"><div><ShieldCheck size={16}/><span>Human confirmation built in</span></div><div><Database size={16}/><span>Evidence stays with each study</span></div></div>
+            <div className="landing-proof">
+              <div><ShieldCheck size={16}/><span>Private by workspace</span></div>
+              <div><Database size={16}/><span>Evidence stays with the study</span></div>
+              <div><CheckCircle2 size={16}/><span>Human review stays in control</span></div>
+            </div>
           </div>
-          <div className="landing-collage">
+
+          <div className="landing-collage" aria-label="People and communities at the heart of research">
             <div className="image-main"><img src="https://images.unsplash.com/photo-1540479859555-17af45c78602?auto=format&fit=crop&w=1200&q=85" alt="Children learning together"/></div>
-            <div className="image-small image-one"><img src="https://images.unsplash.com/photo-1740741705681-2ac01b194a3f?auto=format&fit=crop&w=700&q=85" alt="Smiling child outdoors"/></div>
-            <div className="image-small image-two"><img src="https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=700&q=85" alt="Childhood joy"/></div>
-            <div className="collage-note"><Sparkles size={15}/><strong>Curiosity → evidence → action</strong><span>Research is more than a dataset.</span></div>
+            <div className="image-small image-one"><img src="https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=85" alt="Students learning in a classroom"/></div>
+            <div className="image-small image-two"><img src="https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=800&q=85" alt="Child exploring outdoors"/></div>
+            <div className="image-small image-three"><img src="https://images.unsplash.com/photo-1529390079861-591de354faf5?auto=format&fit=crop&w=800&q=85" alt="Students working together"/></div>
+            <div className="collage-note"><Sparkles size={15}/><strong>People → questions → evidence</strong><span>Research is more than a dataset.</span></div>
+            <div className="collage-stamp"><span>FIELD</span><strong>01</strong><small>START<br/>WITH<br/>PEOPLE</small></div>
           </div>
         </section>
 
-        <section className="landing-story" id="how-it-works">
-          <div className="story-intro"><span className="landing-kicker"><span/> THE FIELD MINDSET</span><h2>Good research should feel <em>alive.</em></h2><p>Behind every questionnaire is a person, a place and a question worth answering. FieldMind is designed to keep those three visible.</p></div>
+        <section className="landing-marquee" aria-label="FieldMind principles">
+          <span>QUESTION</span><i>✦</i><span>LISTEN</span><i>✦</i><span>DOCUMENT</span><i>✦</i><span>REVIEW</span><i>✦</i><span>LEARN</span><i>✦</i><span>QUESTION</span>
+        </section>
+
+        <section className="landing-platform" id="platform">
+          <div className="platform-head">
+            <div>
+              <span className="landing-kicker"><span/> ONE RESEARCH HOME</span>
+              <h2>Everything around the study.<br/><em>Nothing lost in the noise.</em></h2>
+            </div>
+            <p>Built for researchers and field teams who need their instruments, sources and review process to stay connected.</p>
+          </div>
+          <div className="platform-grid">
+            <article className="platform-card platform-card-large">
+              <div className="platform-icon"><ClipboardCheck size={19}/></div>
+              <span className="card-index">01</span>
+              <h3>Questionnaire intelligence</h3>
+              <p>Connect a Kobo project, inspect its deployed form and keep the mapped questions visible before any preparation begins.</p>
+              <div className="mini-ui form-mini"><div><span>Q11</span><strong>Health-seeking behaviour</strong><b>Required</b></div><div><span>Q12</span><strong>Last facility visited</strong><b>Text</b></div><div><span>Q13</span><strong>Barriers to care</strong><b>Choice</b></div></div>
+            </article>
+            <article className="platform-card dark-card">
+              <div className="platform-icon"><BookOpen size={19}/></div>
+              <span className="card-index">02</span>
+              <h3>Evidence beside the work</h3>
+              <p>Keep documented literature, local evidence and source notes attached to the study instead of scattered across folders.</p>
+              <div className="source-lines"><span>Peer-reviewed evidence</span><span>Local context</span><span>Official guidance</span></div>
+            </article>
+            <article className="platform-card">
+              <div className="platform-icon"><Sparkles size={19}/></div>
+              <span className="card-index">03</span>
+              <h3>AI-assisted preparation</h3>
+              <p>Use AI where it helps with workflow QA, while clearly keeping synthetic fixtures separate from genuine participant records.</p>
+              <div className="ai-pill"><Sparkles size={12}/> SYNTHETIC QA ONLY <Check size={12}/></div>
+            </article>
+            <article className="platform-card image-card">
+              <img src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1100&q=85" alt="Students collaborating on research and learning"/>
+              <div><span>04 · COLLABORATION</span><strong>A calmer way to prepare the field.</strong></div>
+            </article>
+          </div>
+        </section>
+
+        <section className="landing-method" id="method">
+          <div className="method-visual">
+            <div className="method-image large"><img src="https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=1100&q=85" alt="Students in a learning environment"/></div>
+            <div className="method-image small"><img src="https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=800&q=85" alt="Smiling child outdoors"/></div>
+            <div className="method-note"><span>THE FIELD MINDSET</span><strong>Start with the person.<br/>Then build the instrument.</strong></div>
+          </div>
+          <div className="method-copy">
+            <span className="landing-kicker"><span/> HOW THE WORK FLOWS</span>
+            <h2>From a blank study to a <em>clearer field plan.</em></h2>
+            <div className="method-steps">
+              <div><b>01</b><div><h3>Create the study</h3><p>Set up a private workspace for one research project and its team.</p></div></div>
+              <div><b>02</b><div><h3>Connect the instrument</h3><p>Bring the deployed Kobo questionnaire into view and inspect its actual fields.</p></div></div>
+              <div><b>03</b><div><h3>Ground the context</h3><p>Attach literature and documented local evidence that the team can actually trace.</p></div></div>
+              <div><b>04</b><div><h3>Review before handoff</h3><p>Keep human confirmation between preparation and any controlled export.</p></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-story" id="stories">
+          <div className="story-intro">
+            <span className="landing-kicker"><span/> WHY IT EXISTS</span>
+            <h2>Because behind every response is a <em>real life.</em></h2>
+            <p>Research can become numbers very quickly. FieldMind is built to keep the question, the evidence and the people behind the work visible.</p>
+          </div>
           <div className="story-grid">
-            <article><div className="story-number">01</div><h3>Build around the study</h3><p>Each account gets its own private research projects, Kobo connection and evidence library. Your work stays separated from everyone else's.</p></article>
-            <article><div className="story-number">02</div><h3>Ground the preparation</h3><p>Bring documented literature and local evidence into the workspace. The system keeps evidence as context rather than pretending inference is fact.</p></article>
-            <article><div className="story-number">03</div><h3>Keep humans in the loop</h3><p>Generated QA fixtures remain clearly synthetic and require review before export. FieldMind helps test a workflow; it does not turn fiction into participant data.</p></article>
+            <article><div className="story-number">01</div><h3>Respect the instrument</h3><p>Your questionnaire is the source of truth. FieldMind works from the fields actually mapped from the study rather than inventing a parallel survey.</p></article>
+            <article><div className="story-number">02</div><h3>Respect the evidence</h3><p>Research sources remain identifiable context. The system is designed to distinguish documented findings from inference.</p></article>
+            <article><div className="story-number">03</div><h3>Respect the person</h3><p>QA fixtures are explicitly synthetic. Real participant data remains a human research responsibility, not something to manufacture.</p></article>
           </div>
         </section>
 
-        <section className="landing-photo-strip">
-          <div className="photo-card"><img src="https://images.unsplash.com/photo-1540479859555-17af45c78602?auto=format&fit=crop&w=1000&q=85" alt="Children learning"/><span>Learning</span></div>
-          <div className="photo-card tall"><img src="https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=1000&q=85" alt="Child exploring"/><span>Curiosity</span></div>
-          <div className="photo-card"><img src="https://images.unsplash.com/photo-1740741705681-2ac01b194a3f?auto=format&fit=crop&w=1000&q=85" alt="Smiling child"/><span>Hope</span></div>
-          <div className="photo-quote"><span>FIELD NOTES</span><strong>“The point is not simply to collect answers. It is to understand what they mean.”</strong></div>
+        <section className="landing-gallery">
+          <div className="gallery-heading">
+            <div><span className="landing-kicker"><span/> THE PEOPLE BEHIND THE QUESTION</span><h2>Research should leave you with <em>better questions.</em></h2></div>
+            <p>Curiosity is where good fieldwork begins — in a classroom, a clinic, a community or a conversation.</p>
+          </div>
+          <div className="gallery-grid">
+            <div className="gallery-photo g1"><img src="https://images.unsplash.com/photo-1540479859555-17af45c78602?auto=format&fit=crop&w=1000&q=85" alt="Children learning"/><span>LEARNING</span></div>
+            <div className="gallery-photo g2"><img src="https://images.unsplash.com/photo-1529390079861-591de354faf5?auto=format&fit=crop&w=900&q=85" alt="Students together"/><span>TOGETHER</span></div>
+            <div className="gallery-copy"><span>FIELD NOTE · 02</span><strong>Listen closely.<br/>Document honestly.<br/>Learn continuously.</strong><small>FieldMind Research Intelligence</small></div>
+            <div className="gallery-photo g3"><img src="https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=900&q=85" alt="Smiling child"/><span>CURIOSITY</span></div>
+            <div className="gallery-photo g4"><img src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=900&q=85" alt="Students collaborating"/><span>COLLABORATION</span></div>
+          </div>
         </section>
 
         <section className="landing-cta">
-          <div><span className="landing-kicker"><span/> READY WHEN THE STUDY IS</span><h2>Bring the next question<br/>into the field.</h2></div>
-          <button className="landing-primary" onClick={() => { setMode('signup'); setShowAuth(true); }}>Create your account <ArrowRight size={17}/></button>
+          <div><span className="landing-kicker"><span/> YOUR NEXT STUDY STARTS HERE</span><h2>Make the work feel<br/><em>clearer.</em></h2><p>One private workspace for the questions, evidence and review that shape your research.</p></div>
+          <button className="landing-primary" onClick={() => openAuth('signup')}>Create your workspace <ArrowRight size={17}/></button>
         </section>
       </main>
 
-      <footer className="landing-footer"><span>© {new Date().getFullYear()} FieldMind Research</span><span>Research workspace · Human review · Evidence grounded</span></footer>
+      <footer className="landing-footer">
+        <div className="footer-top">
+          <div className="footer-brand"><a className="landing-brand" href="#top"><div className="brand-mark"><Sparkles size={17}/></div><div><strong>FieldMind</strong><span>Research Intelligence</span></div></a><p>Research preparation designed around people, evidence and thoughtful review.</p></div>
+          <div className="footer-links"><div><strong>Platform</strong><button onClick={() => document.getElementById('platform')?.scrollIntoView({behavior:'smooth'})}>Questionnaire intelligence</button><button onClick={() => document.getElementById('method')?.scrollIntoView({behavior:'smooth'})}>Research workflow</button><button onClick={() => openAuth('signup')}>Create workspace</button></div><div><strong>Principles</strong><button onClick={() => document.getElementById('stories')?.scrollIntoView({behavior:'smooth'})}>Human review</button><button onClick={() => document.getElementById('stories')?.scrollIntoView({behavior:'smooth'})}>Evidence grounding</button><button onClick={() => document.getElementById('stories')?.scrollIntoView({behavior:'smooth'})}>Synthetic QA</button></div></div>
+        </div>
+        <div className="footer-bottom"><span>© {new Date().getFullYear()} FieldMind Research</span><span>Private workspaces · Evidence grounded · Human reviewed</span><button onClick={() => openAuth('signin')}>Sign in <ArrowUpRight size={12}/></button></div>
+      </footer>
 
       {showAuth && <div className="auth-overlay" onClick={() => setShowAuth(false)}>
         <div className="auth-card" onClick={e => e.stopPropagation()}>
-          <div className="auth-card-top"><div className="auth-mini-mark"><Sparkles size={16}/></div><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create account' : 'Sign in'}</button></div>
+          <div className="auth-card-top"><div className="auth-mini-mark"><Sparkles size={16}/></div><button onClick={() => setShowAuth(false)} aria-label="Close"><X size={16}/></button></div>
           <div className="auth-heading"><span className="landing-kicker"><span/> {mode === 'signin' ? 'WELCOME BACK' : 'JOIN FIELDMIND'}</span><h2>{mode === 'signin' ? 'Your research, ready.' : 'Start your private workspace.'}</h2><p>{mode === 'signin' ? 'Sign in to continue to your studies and evidence.' : 'Every account gets an isolated research workspace.'}</p></div>
           <form onSubmit={submit}>
             {mode === 'signup' && <label><UserRound size={15}/> Full name<input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoComplete="name"/></label>}
@@ -1725,13 +1822,12 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
             {message && <div className="auth-message">{message}</div>}
             <button className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in to FieldMind' : 'Create my workspace'} <ArrowRight size={16}/></button>
           </form>
-          <p className="auth-foot">{mode === 'signin' ? "New here? " : "Already have an account? "}<button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create an account' : 'Sign in instead'}</button></p>
+          <p className="auth-foot">{mode === 'signin' ? "New here? " : "Already have an account? "}<button onClick={() => { setMessage(''); setMode(mode === 'signin' ? 'signup' : 'signin'); }}>{mode === 'signin' ? 'Create an account' : 'Sign in instead'}</button></p>
         </div>
       </div>}
     </div>
   );
 }
-
 function Stat({
   label,
   value,
