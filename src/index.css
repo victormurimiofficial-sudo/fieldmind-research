@@ -1526,3 +1526,6 @@ button:disabled{opacity:.52;cursor:not-allowed}
   .auth-card{border-radius:22px 22px 14px 14px}
   .user-copy{display:none}
 }
+
+.admin-clear{border:1px solid #ead8d3;background:#fff8f5;color:#a65f4f;border-radius:9px;padding:8px 10px;font-size:8px;font-weight:800;white-space:nowrap}.admin-clear:hover{background:#fceee8}
+@media(max-width:720px){.admin-clear{display:none}}
