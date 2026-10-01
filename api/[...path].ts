@@ -339,14 +339,20 @@ async function inspectKobo(url: string, source: string, token: string) {
   const auth = token || process.env.KOBO_API_TOKEN || '';
   const headers = auth ? { Authorization: 'Token ' + auth } : {};
   const inputHost = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ''; } })();
-  const preferred = inputHost === 'ee.kobotoolbox.org' || inputHost === 'eu.kobotoolbox.org'
-    ? 'https://eu.kobotoolbox.org'
-    : inputHost === 'kf.kobotoolbox.org'
-      ? 'https://kf.kobotoolbox.org'
+  // ee.kobotoolbox.org is the Enketo web-form host, not the KPI v2 API host.
+  // A global Kobo form normally resolves through kf.kobotoolbox.org; an EU
+  // form uses eu.kobotoolbox.org. For an ee/Enketo link, try both API servers
+  // instead of incorrectly forcing every /x/ link to the EU server.
+  const preferred = inputHost === 'kf.kobotoolbox.org'
+    ? 'https://kf.kobotoolbox.org'
+    : inputHost === 'eu.kobotoolbox.org' || inputHost === 'ee-eu.kobotoolbox.org'
+      ? 'https://eu.kobotoolbox.org'
       : '';
-  const bases = preferred
-    ? [preferred]
-    : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
+  const bases = inputHost === 'ee.kobotoolbox.org'
+    ? ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org']
+    : preferred
+      ? [preferred]
+      : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
   const diagnostics: Array<{ endpoint: string; status: number; contentType?: string }> = [];
 
   if (uid) {
@@ -408,6 +414,82 @@ async function inspectKobo(url: string, source: string, token: string) {
           } catch {}
         }
       } catch {}
+    }
+  }
+
+  // The /x/<id> value is an Enketo share/form ID, not a KPI asset UID.
+  // Resolve it through the authenticated v2 asset list before falling back to
+  // scraping the public form shell. This is the reliable path for private forms.
+  const shareId = String(url.match(/\/x\/([A-Za-z0-9_-]+)/i)?.[1] || '');
+  if (!uid && shareId && auth) {
+    for (const base of bases) {
+      try {
+        let next = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const seenPages = new Set<string>();
+        const candidates: Array<{ uid: string; name: string; url: string }> = [];
+
+        while (next && !seenPages.has(next) && seenPages.size < 10) {
+          seenPages.add(next);
+          const result = await fetchText(next, headers);
+          diagnostics.push({
+            endpoint: 'assets-list:' + next.replace(/^https?:\/\//, ''),
+            status: result.response.status,
+            contentType: result.response.headers.get('content-type') || undefined,
+          });
+          if (!result.response.ok) break;
+
+          const data = JSON.parse(result.text) as AnyRecord;
+          const results = Array.isArray(data?.results) ? data.results : [];
+
+          for (const item of results) {
+            const uidValue = String(item?.uid || '').trim();
+            if (!uidValue) continue;
+            const nameValue = String(item?.name || item?.settings?.name || item?.title || uidValue).trim();
+
+            const collectStrings = (value: unknown): string[] => {
+              if (typeof value === 'string') return [value];
+              if (Array.isArray(value)) return value.flatMap(collectStrings);
+              if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).flatMap(collectStrings);
+              return [];
+            };
+
+            const searchableUrls = [
+              String(item?.url || ''),
+              String(item?.xform_link || ''),
+              ...collectStrings(item?.deployment__links),
+            ].filter(Boolean);
+
+            if (searchableUrls.some(value => value.toLowerCase().includes('/x/' + shareId.toLowerCase()))) {
+              return await inspectKobo(url, uidValue, token);
+            }
+
+            candidates.push({ uid: uidValue, name: nameValue, url: String(item?.url || '').trim() });
+          }
+
+          const nextUrl = typeof data?.next === 'string' ? data.next : '';
+          next = nextUrl && /^https:\/\/(?:kf|eu)\.kobotoolbox\.org\//i.test(nextUrl) ? nextUrl : '';
+        }
+
+        if (candidates.length === 1) {
+          return await inspectKobo(url, candidates[0].uid, token);
+        }
+
+        if (candidates.length > 0) {
+          return {
+            needsSelection: true,
+            candidates,
+            shareId,
+            source: 'Kobo API project list',
+            diagnostics,
+          };
+        }
+      } catch (error) {
+        diagnostics.push({
+          endpoint: 'assets-list-error:' + base.replace(/^https?:\/\//, ''),
+          status: 0,
+          contentType: error instanceof Error ? error.message : 'request failed',
+        });
+      }
     }
   }
 
