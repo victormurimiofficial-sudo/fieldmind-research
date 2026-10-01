@@ -610,12 +610,25 @@ function App() {
                   <input
                     value={koboUrl}
                     onChange={e => setKoboUrl(e.target.value)}
+                    placeholder="https://kf.kobotoolbox.org/#/forms/.../summary or https://ee.kobotoolbox.org/x/..."
                   />
-                  <button onClick={checkKobo}>
+                  <button onClick={checkKobo} disabled={!koboUrl.trim()}>
                     <RefreshCw size={15} /> Check
                   </button>
                 </div>
-                <div className="kobo-source"><label className="field-label">Kobo project Summary URL or Asset UID <span>for exact mapping</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="https://eu.kobotoolbox.org/#/forms/ASSET_UID/summary or ASSET_UID" /><small className="field-help">Do not paste the /x/... web-form share link here. The /x/ code is a share ID, not the Asset UID.</small><label className="field-label">Kobo API key <span>needed for exact Asset UID mapping · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Paste your Kobo API key for exact mapping" autoComplete="off" /></div>
+                <p className="field-help">Paste one Kobo link. FieldMind detects the server and Asset UID automatically, then retrieves the deployed XForm.</p>
+                <details className="kobo-advanced">
+                  <summary>Advanced: private Kobo form / API key</summary>
+                  <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
+                  <input
+                    type="password"
+                    value={koboToken}
+                    onChange={e => setKoboToken(e.target.value)}
+                    placeholder="Paste your current Kobo API key"
+                    autoComplete="off"
+                  />
+                  <p className="field-help">The key is sent only to FieldMind's inspection endpoint and is never stored with the project.</p>
+                </details>
                 <div className="connection-result">
                   <span
                     className={koboState.offline ? 'check-icon' : 'warn-icon'}
