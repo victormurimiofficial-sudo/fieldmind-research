@@ -326,6 +326,54 @@ nav {
   top: 25px;
   left: 33%;
 }
+.field-illustration {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.map-grid {
+  position: absolute;
+  inset: 42px 35px 38px 35px;
+  border-radius: 50%;
+  background-image: linear-gradient(rgba(95, 119, 98, .10) 1px, transparent 1px), linear-gradient(90deg, rgba(95, 119, 98, .10) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at center, #000 35%, transparent 72%);
+  opacity: .75;
+}
+.route-line {
+  position: absolute;
+  height: 2px;
+  background: #7f9c67;
+  transform-origin: left center;
+  border-radius: 4px;
+  opacity: .65;
+}
+.route-a { width: 180px; left: 22%; top: 62%; transform: rotate(-26deg); }
+.route-b { width: 125px; left: 44%; top: 43%; transform: rotate(35deg); }
+.pin {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50% 50% 50% 0;
+  background: #6f8f50;
+  transform: rotate(-45deg);
+  box-shadow: 0 8px 18px rgba(57, 76, 60, .18);
+}
+.pin span { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: #edf4e8; top: 6px; left: 6px; }
+.pin-a { left: 27%; top: 55%; }
+.pin-b { left: 63%; top: 30%; background: #a6be7d; }
+.researcher { position: absolute; left: 22%; bottom: 22px; width: 88px; height: 150px; }
+.researcher-head { position: absolute; width: 38px; height: 38px; border-radius: 50%; background: #b88b68; left: 27px; top: 3px; box-shadow: inset -5px -4px rgba(70, 49, 39, .08); }
+.researcher-body { position: absolute; width: 65px; height: 88px; border-radius: 30px 30px 16px 16px; background: #344f42; left: 12px; top: 38px; }
+.researcher-arm { position: absolute; width: 63px; height: 13px; border-radius: 99px; background: #b88b68; left: 36px; top: 73px; transform: rotate(-24deg); transform-origin: left center; }
+.phone-card { position: absolute; right: 12%; top: 25px; width: 122px; height: 198px; border-radius: 21px; background: #17251e; padding: 7px; transform: rotate(6deg); box-shadow: 0 24px 45px rgba(36, 55, 43, .20); }
+.phone-speaker { width: 31px; height: 4px; border-radius: 9px; background: #34443b; margin: 2px auto 7px; }
+.phone-screen { height: 168px; border-radius: 15px; background: #f7faf5; padding: 16px 12px; }
+.phone-screen .screen-label { display: block; font-size: 7px; letter-spacing: .12em; font-weight: 800; color: #78887c; }
+.phone-screen strong { display: block; font-size: 37px; letter-spacing: -2px; color: #1d2b23; margin-top: 25px; }
+.phone-screen small { display: block; color: #8b968f; font-size: 8px; }
+.phone-screen i { display: block; height: 7px; background: #e5ebe2; border-radius: 9px; margin-top: 28px; overflow: hidden; }
+.phone-screen i b { display: block; width: 72%; height: 100%; background: #9ab66d; border-radius: inherit; }
 .research-card {
   position: absolute;
   width: 255px;
@@ -1153,6 +1201,29 @@ label textarea:focus {
   min-height: 75px;
   resize: vertical;
 }
+.modal select {
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid #dde4de;
+  outline: none;
+  background: #fafbf9;
+  color: #39453e;
+  border-radius: 9px;
+  padding: 10px 11px;
+  font-size: 10px;
+}
+.form-two { display: grid; grid-template-columns: 1.4fr .6fr; gap: 10px; }
+.edit-modal { width: min(720px, 100%); max-height: min(760px, 92vh); overflow: auto; }
+.edit-note { display: flex; gap: 7px; align-items: center; color: #68776e; background: #f0f6ec; border: 1px solid #dce7d5; padding: 10px; border-radius: 10px; font-size: 9px; margin-bottom: 12px; }
+.edit-fields { display: grid; gap: 3px; }
+.edit-fields label { margin: 8px 0; }
+.edit-field-name { display: block; color: #98a39b; font-size: 7px; font-weight: 500; margin-top: 3px; }
+.edit-fields textarea { min-height: 58px; }
+.review-card-actions { display: flex; gap: 5px; align-items: center; }
+.icon-small { border: 1px solid #e0e5df; background: #fafbf9; color: #66736b; border-radius: 7px; padding: 6px 8px; font-size: 8px; }
+.icon-small.danger, .source-link.danger { color: #9a6b6b; }
+.source-link.danger { margin-top: 8px; }
+
 .optional {
   color: #a1aaa5;
   font-weight: 500;
@@ -1186,6 +1257,15 @@ label textarea:focus {
 }
 
 @media (max-width: 980px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-visual { min-height: 300px; }
+  .research-card { right: 12%; top: 54px; }
+  .phone-card { right: 18%; }
+  .researcher { left: 15%; }
+  .hero-copy { padding: 36px 28px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .two-col, .builder-grid { grid-template-columns: 1fr; }
+  .source-list { grid-template-columns: 1fr 1fr; }
   .sidebar {
     position: fixed;
     left: 0;
