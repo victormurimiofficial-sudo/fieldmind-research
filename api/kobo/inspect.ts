@@ -308,27 +308,61 @@ async function inspect(url: string, source: string, token: string) {
   // from the surveys they are actually allowed to access instead of making
   // them understand Kobo's internal identifiers.
   if (!uid && shareId && auth) {
+    // Kobo's v2 asset response exposes the deployed web-form link under
+    // deployment__links. That link contains the same /x/<shareId> value the
+    // user pasted. Use it to resolve the Asset UID automatically instead of
+    // making the user understand Kobo's internal IDs.
     for (const base of bases) {
       try {
-        const result = await fetchText(
-          base + '/api/v2/assets/?asset_type=survey&limit=100',
-          headers
-        );
-        statuses.push({
-          endpoint: ('assets-list:' + base).replace(/https?:\\/\\//, ''),
-          status: result.response.status,
-          contentType: result.response.headers.get('content-type') || undefined,
-        });
-        if (!result.response.ok) continue;
-        const data = JSON.parse(result.text) as AnyRecord;
-        const results = Array.isArray(data?.results) ? data.results : [];
-        const candidates = results
-          .map((item: AnyRecord) => ({
-            uid: String(item?.uid || ''),
-            name: String(item?.name || item?.settings?.name || item?.title || '').trim(),
-            url: String(item?.url || '').trim(),
-          }))
-          .filter((item: AnyRecord) => item.uid && item.name);
+        let next = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const candidates: AnyRecord[] = [];
+        const seenPages = new Set<string>();
+
+        while (next && !seenPages.has(next) && seenPages.size < 10) {
+          seenPages.add(next);
+          const result = await fetchText(next, headers);
+          statuses.push({
+            endpoint: ('assets-list:' + next).replace(/^https?:\\/\\//, ''),
+            status: result.response.status,
+            contentType: result.response.headers.get('content-type') || undefined,
+          });
+          if (!result.response.ok) break;
+
+          const data = JSON.parse(result.text) as AnyRecord;
+          const results = Array.isArray(data?.results) ? data.results : [];
+
+          for (const item of results) {
+            const uidValue = String(item?.uid || '');
+            const nameValue = String(item?.name || item?.settings?.name || item?.title || '').trim();
+            if (!uidValue || !nameValue) continue;
+
+            const deployedLinks = item?.deployment__links && typeof item.deployment__links === 'object'
+              ? Object.values(item.deployment__links).filter((value): value is string => typeof value === 'string')
+              : [];
+            const searchableUrls = [
+              String(item?.url || ''),
+              String(item?.xform_link || ''),
+              ...deployedLinks,
+            ].filter(Boolean);
+
+            if (searchableUrls.some(value => value.toLowerCase().includes('/x/' + shareId.toLowerCase()))) {
+              return await inspect(url, uidValue, token);
+            }
+
+            candidates.push({ uid: uidValue, name: nameValue, url: String(item?.url || '').trim() });
+          }
+
+          const nextUrl = typeof data?.next === 'string' ? data.next : '';
+          next = nextUrl && nextUrl.startsWith(base) ? nextUrl : '';
+        }
+
+        // If the account has exactly one accessible survey and Kobo did not
+        // expose the share link in the list response, resolve it directly.
+        // This keeps the common single-project case one-click.
+        if (candidates.length === 1) {
+          return await inspect(url, candidates[0].uid, token);
+        }
+
         if (candidates.length) {
           return {
             needsSelection: true,
