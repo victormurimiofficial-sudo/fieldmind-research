@@ -734,17 +734,30 @@ function App() {
                     <p className="field-help">FieldMind found these surveys through your Kobo account. Select the one behind this /x/ link and tap Check again.</p>
                   </div>
                 )}
-                <details className="kobo-advanced">
+                <details className="kobo-advanced" open={Boolean(koboToken)}>
                   <summary>Advanced: private Kobo form / API key</summary>
                   <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
-                  <input
-                    type="password"
-                    value={koboToken}
-                    onChange={e => setKoboToken(e.target.value)}
-                    placeholder="Paste your current Kobo API key"
-                    autoComplete="off"
-                  />
-                  <p className="field-help">The key is sent only to FieldMind's inspection endpoint and is never stored with the project.</p>
+                  <div className="secret-row">
+                    <input
+                      type={showKoboToken ? 'text' : 'password'}
+                      value={koboToken}
+                      onChange={e => setKoboToken(e.target.value)}
+                      placeholder="Paste your current Kobo API key"
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="secret-toggle"
+                      onClick={() => setShowKoboToken(value => !value)}
+                      aria-label={showKoboToken ? "Hide Kobo API key" : "Show Kobo API key"}
+                      title={showKoboToken ? "Hide API key" : "Show API key"}
+                    >
+                      {showKoboToken ? <EyeOff size={15} /> : <Eye size={15} />}
+                      <span>{showKoboToken ? "Hide" : "Show"}</span>
+                    </button>
+                  </div>
+                  <p className="field-help">You can reveal the key here to verify it was pasted correctly. It stays in this browser session and is sent only to FieldMind’s inspection endpoint.</p>
                 </details>
                 <div className="connection-result">
                   <span
