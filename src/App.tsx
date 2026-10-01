@@ -110,6 +110,40 @@ const emptyProject: Project = {
   updatedAt: '',
 };
 
+
+const WORKSPACE_STORAGE_KEY = 'fieldmind:workspace:v2';
+
+type WorkspaceSnapshot = {
+  version: 2;
+  savedAt: string;
+  page: string;
+  projects: Project[];
+  sources: Source[];
+  drafts: Draft[];
+  selectedProject: Project;
+  fields: FormField[];
+  koboUrl: string;
+  koboState: { checked: boolean; offline: boolean; title: string; questionCount: number; error: string };
+  koboCandidates: { uid: string; name: string; url: string }[];
+  koboCandidateUid: string;
+  draftCount: number;
+  ageMix: string;
+  majority: string;
+};
+
+function readWorkspaceSnapshot(): Partial<WorkspaceSnapshot> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 2) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 const nav = [
   { key: 'overview', label: 'Overview', icon: Activity },
   { key: 'projects', label: 'Projects', icon: Layers3 },
@@ -119,23 +153,24 @@ const nav = [
 ];
 
 function App() {
-  const [page, setPage] = useState('overview');
+  const cached = readWorkspaceSnapshot();
+  const [page, setPage] = useState(() => cached?.page || 'overview');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project>(emptyProject);
-  const [fields, setFields] = useState<FormField[]>([]);
-  const [koboUrl, setKoboUrl] = useState('');
+  const [projects, setProjects] = useState<Project[]>(() => cached?.projects || []);
+  const [sources, setSources] = useState<Source[]>(() => cached?.sources || []);
+  const [drafts, setDrafts] = useState<Draft[]>(() => cached?.drafts || []);
+  const [selectedProject, setSelectedProject] = useState<Project>(() => cached?.selectedProject || emptyProject);
+  const [fields, setFields] = useState<FormField[]>(() => cached?.fields || []);
+  const [koboUrl, setKoboUrl] = useState(() => cached?.koboUrl || cached?.selectedProject?.koboUrl || '');
   const [koboToken, setKoboToken] = useState('');
   const [showKoboToken, setShowKoboToken] = useState(false);
-  const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
-  const [koboCandidates, setKoboCandidates] = useState<{ uid: string; name: string; url: string }[]>([]);
-  const [koboCandidateUid, setKoboCandidateUid] = useState('');
-  const [draftCount, setDraftCount] = useState(1);
+  const [koboState, setKoboState] = useState(() => cached?.koboState || { checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+  const [koboCandidates, setKoboCandidates] = useState(() => cached?.koboCandidates || []);
+  const [koboCandidateUid, setKoboCandidateUid] = useState(() => cached?.koboCandidateUid || '');
+  const [draftCount, setDraftCount] = useState(() => cached?.draftCount || 1);
   const [backendState, setBackendState] = useState<'checking'|'ready'|'error'>('checking');
-  const [ageMix, setAgeMix] = useState('18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
-  const [majority, setMajority] = useState('No directional tendency');
+  const [ageMix, setAgeMix] = useState(() => cached?.ageMix || '18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
+  const [majority, setMajority] = useState(() => cached?.majority || 'No directional tendency');
   const [isGenerating, setIsGenerating] = useState(false);
   const [toast, setToast] = useState('');
   const [showNewProject, setShowNewProject] = useState(false);
@@ -156,39 +191,116 @@ function App() {
   const hasRejectedFields = projectDrafts.some(d => d.fields.some(f => f.status === 'rejected'));
   const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
 
+  // Rehydrate the last workspace immediately, then reconcile with the API.
+  // Cached state is intentionally never cleared just because the backend is
+  // temporarily unavailable. This makes refresh safe during outages.
   useEffect(() => {
     let alive = true;
+    const cachedProjectId = selectedProject.id;
     const boot = async () => {
       try {
         const health = await api.get('/api/_healthcheck');
         if (!health.data?.ok || health.data?.database !== 'configured' || health.data?.ai !== 'configured') {
           throw new Error('Backend configuration is incomplete.');
         }
-        const [projectResult, draftResult] = await Promise.all([api.get('/api/projects'), api.get('/api/drafts')]);
+
+        const [projectResult, draftResult] = await Promise.all([
+          api.get('/api/projects'),
+          api.get('/api/drafts'),
+        ]);
         if (!alive) return;
+
         const loadedProjects = Array.isArray(projectResult.data?.projects) ? projectResult.data.projects : [];
+        const loadedDrafts = Array.isArray(draftResult.data?.drafts) ? draftResult.data.drafts : [];
         setProjects(loadedProjects);
-        setDrafts(Array.isArray(draftResult.data?.drafts) ? draftResult.data.drafts : []);
-        const first = loadedProjects[0];
-        if (first) {
-          setSelectedProject(first);
-          setKoboUrl(first.koboUrl || '');
-          const sourceResult = await api.get('/api/sources?projectId=' + encodeURIComponent(first.id));
-          if (alive) setSources(Array.isArray(sourceResult.data?.sources) ? sourceResult.data.sources : []);
-        } else {
+        setDrafts(loadedDrafts);
+
+        const preferred = cachedProjectId
+          ? loadedProjects.find((project: Project) => project.id === cachedProjectId)
+          : undefined;
+        const activeProject = preferred || loadedProjects[0];
+
+        if (activeProject) {
+          const sameProject = activeProject.id === cachedProjectId;
+          setSelectedProject(activeProject);
+          setKoboUrl(sameProject && cached?.koboUrl ? cached.koboUrl : (activeProject.koboUrl || ''));
+
+          if (!sameProject) {
+            setFields([]);
+            setKoboState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+            setKoboCandidates([]);
+            setKoboCandidateUid('');
+          }
+
+          try {
+            const sourceResult = await api.get('/api/sources?projectId=' + encodeURIComponent(activeProject.id));
+            if (alive) {
+              setSources(Array.isArray(sourceResult.data?.sources) ? sourceResult.data.sources : []);
+            }
+          } catch (sourceError) {
+            // Keep the cached research library if this one request fails.
+            console.warn('FieldMind source refresh failed; keeping cached workspace.', sourceError);
+          }
+        } else if (!cachedProjectId) {
           setSelectedProject(emptyProject);
           setSources([]);
         }
+
         setBackendState('ready');
       } catch (e) {
         if (!alive) return;
+        // Do not reset projects, drafts, Kobo mapping, page, or selected project.
+        // The browser cache is the last known good workspace while the API is down.
         setBackendState('error');
-        setToast(e instanceof Error ? e.message : 'Backend connection failed.');
+        setToast('Showing your last saved workspace. Backend is currently unavailable.');
       }
     };
     boot();
     return () => { alive = false; };
   }, []);
+
+  // Persist the complete user-facing workspace, but never persist the Kobo API
+  // token. localStorage is used as a local cache so a refresh can restore the
+  // exact screen even when the backend is unavailable.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const snapshot: WorkspaceSnapshot = {
+        version: 2,
+        savedAt: new Date().toISOString(),
+        page,
+        projects,
+        sources,
+        drafts,
+        selectedProject,
+        fields,
+        koboUrl,
+        koboState,
+        koboCandidates,
+        koboCandidateUid,
+        draftCount,
+        ageMix,
+        majority,
+      };
+      window.localStorage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      console.warn('FieldMind workspace cache could not be saved.', error);
+    }
+  }, [
+    page,
+    projects,
+    sources,
+    drafts,
+    selectedProject,
+    fields,
+    koboUrl,
+    koboState,
+    koboCandidates,
+    koboCandidateUid,
+    draftCount,
+    ageMix,
+    majority,
+  ]);
 
   useEffect(() => {
     if (!toast) return;
@@ -405,12 +517,14 @@ function App() {
     setKoboUrl(project.koboUrl || '');
     setFields([]);
     setKoboState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+    setKoboCandidates([]);
+    setKoboCandidateUid('');
     try {
       const result = await api.get('/api/sources?projectId=' + encodeURIComponent(project.id));
       setSources(Array.isArray(result.data?.sources) ? result.data.sources : []);
     } catch (e) {
-      setSources([]);
-      setToast(e instanceof Error ? e.message : 'Could not load the research library.');
+      // Keep the current cached library instead of blanking the workspace.
+      setToast(e instanceof Error ? e.message : 'Could not load the research library. Showing cached workspace.');
     }
   };
 
