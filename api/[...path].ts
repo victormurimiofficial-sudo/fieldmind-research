@@ -354,6 +354,7 @@ async function inspectKobo(url: string, source: string, token: string) {
       ? [preferred]
       : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
   const diagnostics: Array<{ endpoint: string; status: number; contentType?: string }> = [];
+  let assetStatus: number | undefined;
 
   if (uid) {
     for (const base of bases) {
@@ -381,6 +382,7 @@ async function inspectKobo(url: string, source: string, token: string) {
 
       try {
         const detail = await fetchText(base + '/api/v2/assets/' + encodeURIComponent(uid) + '/', headers);
+        assetStatus = detail.response.status;
         diagnostics.push({
           endpoint: ('asset:' + base).replace(/https?:\/\//, ''),
           status: detail.response.status,
@@ -426,24 +428,35 @@ async function inspectKobo(url: string, source: string, token: string) {
   if (uid && auth) {
     for (const base of bases) {
       try {
-        const listEndpoint = base + '/api/v2/assets/?asset_type=survey&limit=100';
-        const listResult = await fetchText(listEndpoint, headers);
-        diagnostics.push({
-          endpoint: ('assets-list-for-uid:' + base).replace(/^https?:\/\//, ''),
-          status: listResult.response.status,
-          contentType: listResult.response.headers.get('content-type') || undefined,
-        });
-        if (!listResult.response.ok) continue;
+        let next = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const seenPages = new Set<string>();
+        let matchedAsset: AnyRecord | null = null;
 
-        const listData = JSON.parse(listResult.text) as AnyRecord;
-        const results = Array.isArray(listData?.results) ? listData.results : [];
-        const match = results.find(item => String(item?.uid || '') === uid);
-        if (!match) continue;
+        while (next && !seenPages.has(next) && seenPages.size < 10) {
+          seenPages.add(next);
+          const listResult = await fetchText(next, headers);
+          diagnostics.push({
+            endpoint: ('assets-list-for-uid:' + next).replace(/^https?:\/\//, ''),
+            status: listResult.response.status,
+            contentType: listResult.response.headers.get('content-type') || undefined,
+          });
+          if (!listResult.response.ok) break;
+
+          const listData = JSON.parse(listResult.text) as AnyRecord;
+          const results = Array.isArray(listData?.results) ? listData.results : [];
+          matchedAsset = results.find(item => String(item?.uid || '') === uid) || null;
+          if (matchedAsset) break;
+
+          const nextUrl = typeof listData?.next === 'string' ? listData.next : '';
+          next = nextUrl && nextUrl.startsWith(base) ? nextUrl : '';
+        }
+
+        if (!matchedAsset) continue;
 
         const links: string[] = [
-          typeof match?.xform_link === 'string' ? match.xform_link : '',
-          ...(Array.isArray(match?.downloads)
-            ? match.downloads
+          typeof matchedAsset.xform_link === 'string' ? matchedAsset.xform_link : '',
+          ...(Array.isArray(matchedAsset.downloads)
+            ? matchedAsset.downloads
                 .filter((item: AnyRecord) => /xform|xml/i.test(String(item?.format || item?.type || '')))
                 .map((item: AnyRecord) => String(item?.url || ''))
             : []),
@@ -837,7 +850,7 @@ export default async function handler(req: any, res: any) {
         const failure = resolved as any;
         const diagnostics = Array.isArray(failure?.diagnostics) ? failure.diagnostics : [];
         const authRequired = diagnostics.some((item: any) => item.status === 401 || item.status === 403);
-        const notFound = diagnostics.some((item: any) => item.status === 404);
+        const notFound = Number(failure?.assetStatus) === 404;
         send(res, 422, {
           reachable: true,
           mapped: false,
