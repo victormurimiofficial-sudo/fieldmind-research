@@ -816,29 +816,41 @@ async function postSyntheticKoboSubmission(
   ownerUsername: string
 ) {
   const base = submissionServer.replace(/\/$/, '');
-  const candidates = [
-    base + '/' + encodeURIComponent(ownerUsername) + '/submission',
-    base + '/submission',
-  ];
+  const serverCandidates = [base];
+  if (base.includes('kc.kobotoolbox.org')) serverCandidates.push('https://kf.kobotoolbox.org');
+  if (base.includes('kc-eu.kobotoolbox.org')) serverCandidates.push('https://eu.kobotoolbox.org');
+
   let lastStatus = 0;
   let lastBody = '';
-  for (const endpoint of candidates) {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/xml',
-        'User-Agent': 'FieldMind-Research/6.0',
-      },
-      body: JSON.stringify(submission),
-    });
-    const body = await response.text().catch(() => '');
-    lastStatus = response.status;
-    lastBody = body;
-    if (response.ok) return { ok: true, status: response.status, body, endpoint };
-    if (response.status !== 404) break;
+  let lastEndpoint = '';
+
+  for (const server of Array.from(new Set(serverCandidates))) {
+    const candidates = [
+      server + '/' + encodeURIComponent(ownerUsername) + '/submission',
+      server + '/submission',
+    ];
+    for (const endpoint of candidates) {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/xml',
+          'User-Agent': 'FieldMind-Research/6.0',
+        },
+        body: JSON.stringify(submission),
+      });
+      const body = await response.text().catch(() => '');
+      lastStatus = response.status;
+      lastBody = body;
+      lastEndpoint = endpoint;
+      if (response.ok) return { ok: true, status: response.status, body, endpoint };
+      if (response.status !== 404) {
+        return { ok: false, status: response.status, body, endpoint };
+      }
+    }
   }
-  return { ok: false, status: lastStatus, body: lastBody, endpoint: candidates[0] };
+
+  return { ok: false, status: lastStatus, body: lastBody, endpoint: lastEndpoint };
 }
 
 export default async function handler(req: any, res: any) {
