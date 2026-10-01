@@ -1601,6 +1601,7 @@ function App() {
 
 function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [showAuth, setShowAuth] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -1643,8 +1644,8 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
         <div className="landing-brand"><div className="brand-mark"><Sparkles size={17}/></div><div><strong>FieldMind</strong><span>Research Intelligence</span></div></div>
         <div className="landing-nav-actions">
           <span className="landing-trust"><ShieldCheck size={14}/> Private research workspaces</span>
-          <button className="landing-login" onClick={() => setMode('signin')}>Sign in</button>
-          <button className="landing-signup" onClick={() => setMode('signup')}>Create account <ArrowUpRight size={14}/></button>
+          <button className="landing-login" onClick={() => { setMode('signin'); setShowAuth(true); }}>Sign in</button>
+          <button className="landing-signup" onClick={() => { setMode('signup'); setShowAuth(true); }}>Create account <ArrowUpRight size={14}/></button>
         </div>
       </header>
 
@@ -1655,7 +1656,7 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
             <h1>Research that starts<br/><em>with people.</em></h1>
             <p>FieldMind brings questionnaires, evidence, field context and quality review into one calm research workspace — so teams can prepare better studies without losing the human side of the work.</p>
             <div className="landing-actions">
-              <button className="landing-primary" onClick={() => setMode('signup')}>Start a research workspace <ArrowRight size={17}/></button>
+              <button className="landing-primary" onClick={() => { setMode('signup'); setShowAuth(true); }}>Start a research workspace <ArrowRight size={17}/></button>
               <button className="landing-secondary" onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}>See how it works <ChevronRight size={16}/></button>
             </div>
             <div className="landing-proof"><div><ShieldCheck size={16}/><span>Human confirmation built in</span></div><div><Database size={16}/><span>Evidence stays with each study</span></div></div>
@@ -1686,14 +1687,14 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
 
         <section className="landing-cta">
           <div><span className="landing-kicker"><span/> READY WHEN THE STUDY IS</span><h2>Bring the next question<br/>into the field.</h2></div>
-          <button className="landing-primary" onClick={() => setMode('signup')}>Create your account <ArrowRight size={17}/></button>
+          <button className="landing-primary" onClick={() => { setMode('signup'); setShowAuth(true); }}>Create your account <ArrowRight size={17}/></button>
         </section>
       </main>
 
       <footer className="landing-footer"><span>© {new Date().getFullYear()} FieldMind Research</span><span>Research workspace · Human review · Evidence grounded</span></footer>
 
-      <div className="auth-overlay">
-        <div className="auth-card">
+      {showAuth && <div className="auth-overlay" onClick={() => setShowAuth(false)}>
+        <div className="auth-card" onClick={e => e.stopPropagation()}>
           <div className="auth-card-top"><div className="auth-mini-mark"><Sparkles size={16}/></div><button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create account' : 'Sign in'}</button></div>
           <div className="auth-heading"><span className="landing-kicker"><span/> {mode === 'signin' ? 'WELCOME BACK' : 'JOIN FIELDMIND'}</span><h2>{mode === 'signin' ? 'Your research, ready.' : 'Start your private workspace.'}</h2><p>{mode === 'signin' ? 'Sign in to continue to your studies and evidence.' : 'Every account gets an isolated research workspace.'}</p></div>
           <form onSubmit={submit}>
@@ -1705,7 +1706,7 @@ function LandingPage({ onAuthenticated }: { onAuthenticated: (user: AuthUser) =>
           </form>
           <p className="auth-foot">{mode === 'signin' ? "New here? " : "Already have an account? "}<button onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}>{mode === 'signin' ? 'Create an account' : 'Sign in instead'}</button></p>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
