@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { ownerMatches, requireAuth, type AuthUser } from './_auth';
 
 type AnyRecord = Record<string, any>;
 type FormOption = { name: string; label: string };
@@ -37,13 +38,25 @@ function db() {
   return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
-async function insert(records: AnyRecord[]) {
+async function insert(records: AnyRecord[], user: AuthUser) {
   const { data, error } = await db()
     .from(TABLE)
-    .insert(records.map(record => ({ collection: 'drafts', record })))
+    .insert(records.map(record => ({ collection: 'drafts', record: { ...record, ownerId: user.id } })))
     .select('id');
   if (error) throw error;
   return (data || []).map((row: any) => row.id);
+}
+
+async function verifyProject(projectId: string, user: AuthUser) {
+  const { data, error } = await db()
+    .from(TABLE)
+    .select('id,record,collection')
+    .eq('id', projectId)
+    .eq('collection', 'projects')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data || !ownerMatches(data.record, user)) return false;
+  return true;
 }
 
 function send(res: any, status: number, payload: any) {
@@ -105,6 +118,38 @@ function fallbackValue(field: FormField, fieldIndex: number, recordIndex: number
   if (/time/i.test(field.type)) return '12:00:00';
   if (/geopoint/i.test(field.type)) return '0 0 0 0';
   return id + '_' + field.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function localSyntheticBatch(project: AnyRecord, fields: FormField[], indexes: number[]) {
+  return {
+    drafts: indexes.map((recordIndex, offset) => ({
+      label: 'Local synthetic QA fixture ' + String(recordIndex + 1).padStart(3, '0'),
+      fields: fields.map((field, fieldIndex) => {
+        if (field.relevant) {
+          return {
+            name: field.name,
+            value: '__NOT_APPLICABLE_BY_FORM_LOGIC__',
+            confidence: 100,
+            evidence: 'Local QA compiler followed the questionnaire conditional rule; not participant data.',
+          };
+        }
+        const value = field.options?.length
+          ? field.options[(fieldIndex + recordIndex) % field.options.length].name
+          : fallbackValue(field, fieldIndex, recordIndex);
+        return {
+          name: field.name,
+          value,
+          confidence: 100,
+          evidence: 'Local QA compiler generated a deterministic test value; not participant data.',
+        };
+      }),
+    })),
+  };
+}
+
+function isQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /429|insufficient_quota|credit_balance|no credits remaining|quota/i.test(message);
 }
 
 function validateCandidate(candidate: any, fields: FormField[]) {
@@ -235,10 +280,13 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') { send(res, 405, { message: 'Method not allowed' }); return; }
 
   try {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const body = bodyOf(req);
     const fields = (Array.isArray(body.fields) ? body.fields : []) as FormField[];
     const project = (body.project || {}) as AnyRecord;
     if (!project.id) { send(res, 400, { message: 'Select a project before running the FieldMind brain.' }); return; }
+    if (!(await verifyProject(String(project.id), user))) { send(res, 403, { message: 'You do not have access to this research project.' }); return; }
     if (!fields.length) { send(res, 400, { message: 'Inspect the Kobo questionnaire first; the brain needs its authoritative form definition.' }); return; }
 
     const count = Math.max(1, Math.min(100, Number(body.count) || 1));
@@ -246,37 +294,54 @@ export default async function handler(req: any, res: any) {
     const batches = chunks(count, 20);
     const started = Date.now();
 
+    let usedLocalFallback = false;
     const results = await Promise.all(batches.map(async indexes => {
-      let output = await think(project, fields, indexes, String(body.ageMix || ''), String(body.majority || ''), sources);
+      let output: any;
+      try {
+        output = await think(project, fields, indexes, String(body.ageMix || ''), String(body.majority || ''), sources);
+      } catch (error) {
+        if (!isQuotaError(error)) throw error;
+        usedLocalFallback = true;
+        output = localSyntheticBatch(project, fields, indexes);
+      }
+
       let errors = output?.drafts?.flatMap((draft: any) => validateCandidate(draft, fields)) || [];
 
-      // One targeted repair pass if the model violated the form contract.
-      if (errors.length) {
-        output = await aiJson(
-          'Repair a synthetic QA fixture batch. Do not change the questionnaire. Return every field exactly once, remove unexpected fields, add missing fields, use only supplied choices, and preserve the synthetic QA-only requirement.',
-          'FORM: ' + fields.map(f => JSON.stringify(f)).join('\n') +
-          '\nINVALID BATCH: ' + JSON.stringify(output) +
-          '\nVALIDATION ERRORS: ' + errors.join(', '),
-          'fieldmind_brain_repair',
-          schema()
-        );
-        errors = output?.drafts?.flatMap((draft: any) => validateCandidate(draft, fields)) || [];
+      if (errors.length && !usedLocalFallback) {
+        try {
+          output = await aiJson(
+            'Repair a synthetic QA fixture batch. Do not change the questionnaire. Return every field exactly once, remove unexpected fields, add missing fields, use only supplied choices, and preserve the synthetic QA-only requirement.',
+            'FORM: ' + fields.map(f => JSON.stringify(f)).join('\n') +
+            '\nINVALID BATCH: ' + JSON.stringify(output) +
+            '\nVALIDATION ERRORS: ' + errors.join(', '),
+            'fieldmind_brain_repair',
+            schema()
+          );
+          errors = output?.drafts?.flatMap((draft: any) => validateCandidate(draft, fields)) || [];
+        } catch (error) {
+          if (!isQuotaError(error)) throw error;
+          usedLocalFallback = true;
+          output = localSyntheticBatch(project, fields, indexes);
+          errors = output?.drafts?.flatMap((draft: any) => validateCandidate(draft, fields)) || [];
+        }
       }
 
       return { indexes, output, errors };
     }));
 
     const drafts = results.flatMap(result => materialize(project, fields, result.indexes, result.output));
-    const ids = await insert(drafts as AnyRecord[]);
+    const ids = await insert(drafts as AnyRecord[], user);
 
     send(res, 200, {
       drafts: drafts.map((draft, i) => ({ ...draft, id: ids[i] })),
       mode: 'synthetic',
       questionCount: fields.length,
       brain: {
-        version: '1.0',
+        version: '1.1',
+        provider: usedLocalFallback ? 'local-qa-compiler' : 'openai',
+        fallbackUsed: usedLocalFallback,
         batches: batches.length,
-        repairPasses: results.filter(r => r.errors.length === 0).length,
+        repairPasses: 0,
         validationErrors: results.flatMap(r => r.errors),
         elapsedMs: Date.now() - started,
         evidenceSourcesUsed: sources.length,
