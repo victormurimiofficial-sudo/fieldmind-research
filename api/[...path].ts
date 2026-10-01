@@ -181,6 +181,29 @@ function uidFrom(value: string) {
   return /^[A-Za-z0-9_-]{12,}$/.test(raw) ? raw : '';
 }
 
+function xformIdentity(xml: string, fallbackUid: string) {
+  const rootMatch = xml.match(/<([A-Za-z_][A-Za-z0-9_.:-]*)\b[^>]*\bid=["']([^"']+)["']/i);
+  const formId =
+    rootMatch?.[2] ||
+    xml.match(/<[^>]*instance[^>]*>\s*<([A-Za-z_][A-Za-z0-9_.:-]*)\b/i)?.[1] ||
+    fallbackUid;
+  const formhubUuid =
+    xml.match(/<formhub\b[^>]*>[\s\S]*?<uuid\b[^>]*>([^<]+)<\/uuid>/i)?.[1]?.trim() ||
+    xml.match(/<h:formhub\b[^>]*>[\s\S]*?<h:uuid\b[^>]*>([^<]+)<\/h:uuid>/i)?.[1]?.trim() ||
+    '';
+  const submissionUrl =
+    xml.match(/<submission\b[^>]*\baction=["']([^"']+)["']/i)?.[1] ||
+    xml.match(/<xf:submission\b[^>]*\baction=["']([^"']+)["']/i)?.[1] ||
+    '';
+  return { formId, formhubUuid, submissionUrl };
+}
+
+function submissionServerFor(base: string) {
+  return base.includes('eu.kobotoolbox.org')
+    ? 'https://kc-eu.kobotoolbox.org'
+    : 'https://kc.kobotoolbox.org';
+}
+
 function parseXForm(xml: string): { title: string; fields: FormField[] } {
   const title =
     clean(
@@ -360,7 +383,16 @@ async function inspectKobo(url: string, source: string, token: string) {
           if (!result.response.ok) continue;
           const parsed = parseXForm(result.text);
           if (parsed.fields.length) {
-            return { ...parsed, source: 'Kobo API XForm', resolvedUrl: result.response.url || endpoint, diagnostics };
+            return {
+            ...parsed,
+            assetUid: uid,
+            formId: xformIdentity(result.text, uid).formId,
+            formhubUuid: xformIdentity(result.text, uid).formhubUuid,
+            submissionServer: submissionServerFor(base),
+            source: 'Kobo API XForm',
+            resolvedUrl: result.response.url || endpoint,
+            diagnostics,
+          };
           }
         } catch {}
       }
@@ -394,7 +426,16 @@ async function inspectKobo(url: string, source: string, token: string) {
                 if (!result.response.ok) continue;
                 const parsed = parseXForm(result.text);
                 if (parsed.fields.length) {
-                  return { ...parsed, source: 'Kobo API XForm', resolvedUrl: result.response.url || endpoint, diagnostics };
+                  return {
+            ...parsed,
+            assetUid: uid,
+            formId: xformIdentity(result.text, uid).formId,
+            formhubUuid: xformIdentity(result.text, uid).formhubUuid,
+            submissionServer: submissionServerFor(base),
+            source: 'Kobo API XForm',
+            resolvedUrl: result.response.url || endpoint,
+            diagnostics,
+          };
                 }
               } catch {}
             }
@@ -459,11 +500,15 @@ async function inspectKobo(url: string, source: string, token: string) {
             const parsed = parseXForm(xform.text);
             if (parsed.fields.length) {
               return {
-                ...parsed,
-                source: 'Kobo API XForm',
-                resolvedUrl: xform.response.url || endpoint,
-                diagnostics,
-              };
+                  ...parsed,
+                  assetUid: uid,
+                  formId: xformIdentity(xform.text, uid).formId,
+                  formhubUuid: xformIdentity(xform.text, uid).formhubUuid,
+                  submissionServer: submissionServerFor(base),
+                  source: 'Kobo API XForm',
+                  resolvedUrl: xform.response.url || endpoint,
+                  diagnostics,
+                };
             }
           } catch {}
         }
@@ -710,6 +755,92 @@ function toCsv(items: Draft[]) {
   return [header, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
 }
 
+function randomUuid() {
+  const native = (globalThis as any).crypto?.randomUUID;
+  if (typeof native === 'function') return native.call((globalThis as any).crypto);
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+    const random = Math.random() * 16 | 0;
+    const value = char === 'x' ? random : (random & 0x3 | 0x8);
+    return value.toString(16);
+  });
+}
+
+function setNestedSubmissionValue(target: AnyRecord, path: string, value: string) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  if (!parts.length) return;
+  let cursor = target;
+  parts.forEach((part, index) => {
+    if (index === parts.length - 1) cursor[part] = value;
+    else {
+      if (!cursor[part] || typeof cursor[part] !== 'object' || Array.isArray(cursor[part])) cursor[part] = {};
+      cursor = cursor[part];
+    }
+  });
+}
+
+function buildKoboJsonSubmission(draft: Draft, formId: string, formhubUuid: string) {
+  const submission: AnyRecord = {};
+  for (const field of draft.fields) {
+    if (field.value === '__NOT_APPLICABLE_BY_FORM_LOGIC__') continue;
+    setNestedSubmissionValue(submission, field.name, String(field.value));
+  }
+  submission.meta = {
+    ...(submission.meta && typeof submission.meta === 'object' ? submission.meta : {}),
+    instanceID: 'uuid:' + randomUuid(),
+  };
+  if (formhubUuid) {
+    submission.formhub = {
+      ...(submission.formhub && typeof submission.formhub === 'object' ? submission.formhub : {}),
+      uuid: formhubUuid,
+    };
+  }
+  return { id: formId, submission };
+}
+
+async function koboAssetMeta(base: string, uid: string, token: string) {
+  if (!uid || !token) return null;
+  try {
+    const result = await fetchText(base + '/api/v2/assets/' + encodeURIComponent(uid) + '/', {
+      Authorization: 'Token ' + token,
+    });
+    if (!result.response.ok) return null;
+    return JSON.parse(result.text) as AnyRecord;
+  } catch {
+    return null;
+  }
+}
+
+async function postSyntheticKoboSubmission(
+  submission: AnyRecord,
+  submissionServer: string,
+  ownerUsername: string
+) {
+  const base = submissionServer.replace(/\/$/, '');
+  const candidates = [
+    base + '/' + encodeURIComponent(ownerUsername) + '/submission',
+    base + '/submission',
+  ];
+  let lastStatus = 0;
+  let lastBody = '';
+  for (const endpoint of candidates) {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/xml',
+        'User-Agent': 'FieldMind-Research/6.0',
+      },
+      body: JSON.stringify(submission),
+    });
+    const body = await response.text().catch(() => '');
+    lastStatus = response.status;
+    lastBody = body;
+    if (response.ok) return { ok: true, status: response.status, body, endpoint };
+    if (response.status !== 404) break;
+  }
+  return { ok: false, status: lastStatus, body: lastBody, endpoint: candidates[0] };
+}
+
 export default async function handler(req: any, res: any) {
   try {
     if (req.method === 'OPTIONS') {
@@ -936,6 +1067,10 @@ export default async function handler(req: any, res: any) {
         fields: resolved.fields,
         source: resolved.source,
         resolvedUrl: resolved.resolvedUrl,
+        assetUid: (resolved as any).assetUid || '',
+        formId: (resolved as any).formId || (resolved as any).assetUid || '',
+        formhubUuid: (resolved as any).formhubUuid || '',
+        submissionServer: (resolved as any).submissionServer || '',
       });
       return;
     }
@@ -1068,6 +1203,142 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    if (req.method === 'POST' && path === '/api/drafts/submit-test') {
+      const projectId = String(body.projectId || '');
+      const apiToken = String(body.apiToken || '');
+      if (body.testOnly !== true) {
+        send(res, 400, { message: 'This endpoint is reserved for synthetic QA testing.' });
+        return;
+      }
+      if (!apiToken) {
+        send(res, 400, { message: 'Enter the Kobo API key used for this test project.' });
+        return;
+      }
+
+      const project = (await list<AnyRecord>('projects', authUser!, 500)).find(item => String(item.id) === projectId);
+      const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
+
+      if (!projectId || !project) {
+        send(res, 404, { message: 'Project not found.' });
+        return;
+      }
+      if (!items.length) {
+        send(res, 400, { message: 'No synthetic QA fixtures found for this project.' });
+        return;
+      }
+      if (items.some(draft => draft.mode !== 'synthetic')) {
+        send(res, 400, { message: 'Only synthetic QA fixtures can use this test submission route.' });
+        return;
+      }
+      if (items.some(draft => draft.status !== 'confirmed' && draft.status !== 'deployed')) {
+        send(res, 409, { message: 'Confirm every synthetic QA fixture before sending the test batch.' });
+        return;
+      }
+      if (items.length > 100) {
+        send(res, 400, { message: 'A single test batch is limited to 100 submissions.' });
+        return;
+      }
+
+      const koboUrl = String(project.koboUrl || '');
+      if (!safeKoboUrl(koboUrl)) {
+        send(res, 400, { message: 'This project does not have a valid Kobo form URL.' });
+        return;
+      }
+
+      const resolved = await inspectKobo(
+        koboUrl,
+        String((project as any).koboAssetUid || ''),
+        apiToken
+      ) as any;
+
+      if (!resolved || resolved.failure || !resolved.fields?.length) {
+        send(res, 422, {
+          message: 'FieldMind could not resolve the deployed Kobo XForm for this test submission.',
+          code: 'KOBO_XFORM_UNAVAILABLE',
+        });
+        return;
+      }
+
+      const assetUid = String(resolved.assetUid || (project as any).koboAssetUid || '');
+      const formId = String(resolved.formId || assetUid);
+      const formhubUuid = String(resolved.formhubUuid || '');
+      const submissionServer = String(
+        resolved.submissionServer ||
+        (new URL(koboUrl).hostname.includes('eu.') ? 'https://kc-eu.kobotoolbox.org' : 'https://kc.kobotoolbox.org')
+      );
+
+      if (!assetUid || !formId) {
+        send(res, 422, { message: 'The Kobo form is mapped, but its submission identity could not be resolved.' });
+        return;
+      }
+
+      const base = submissionServer.includes('kc-eu.')
+        ? 'https://eu.kobotoolbox.org'
+        : 'https://kf.kobotoolbox.org';
+      const metadata = await koboAssetMeta(base, assetUid, apiToken);
+      const ownerUsername = String(
+        (project as any).koboSubmission?.ownerUsername ||
+        metadata?.owner__username ||
+        ''
+      ).trim();
+
+      if (!ownerUsername) {
+        send(res, 422, {
+          message: 'Kobo mapped successfully, but the owner username needed for the anonymous OpenRosa test route could not be resolved.',
+        });
+        return;
+      }
+
+      const results: Array<{ draftId: string; status: number; ok: boolean; detail?: string }> = [];
+      for (const draft of items) {
+        const payload = buildKoboJsonSubmission(draft, formId, formhubUuid);
+        const posted = await postSyntheticKoboSubmission(payload, submissionServer, ownerUsername);
+        results.push({
+          draftId: String(draft.id),
+          status: posted.status,
+          ok: posted.ok,
+          ...(posted.ok ? {} : { detail: posted.body.slice(0, 300) }),
+        });
+        if (!posted.ok) break;
+      }
+
+      const succeeded = results.filter(item => item.ok).length;
+      if (!succeeded || results.some(item => !item.ok)) {
+        send(res, 502, {
+          submitted: succeeded,
+          attempted: results.length,
+          total: items.length,
+          results,
+          message: succeeded
+            ? 'The test batch stopped after a Kobo submission error.'
+            : 'Kobo rejected the synthetic test submission.',
+        });
+        return;
+      }
+
+      await Promise.all(
+        items.map(draft =>
+          update(String(draft.id), {
+            ...draft,
+            status: 'deployed',
+            testSubmission: {
+              submittedAt: new Date().toISOString(),
+              target: 'kobo-openrosa-test',
+            },
+          }, authUser!)
+        )
+      );
+
+      send(res, 200, {
+        submitted: succeeded,
+        attempted: results.length,
+        total: items.length,
+        testOnly: true,
+        message: 'Synthetic QA test submissions were accepted by Kobo.',
+      });
+      return;
+    }
+
     if (req.method === 'POST' && path === '/api/drafts/deploy') {
       const projectId = String(body.projectId || '');
       const items = (await list<Draft>('drafts', authUser!, 500)).filter(draft => draft.projectId === projectId);
@@ -1089,7 +1360,7 @@ export default async function handler(req: any, res: any) {
       send(res, 200, {
         deployed: true,
         packagePrepared: true,
-        message: 'Controlled synthetic QA package prepared. No live Kobo submission was performed.',
+        message: 'Controlled synthetic QA package prepared. No Kobo submission was performed by this package action.',
       });
       return;
     }
