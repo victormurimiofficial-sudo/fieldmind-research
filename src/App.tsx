@@ -616,7 +616,7 @@ function App() {
                     <RefreshCw size={15} /> Check
                   </button>
                 </div>
-                <div className="kobo-source"><label className="field-label">Kobo project Summary URL or Asset UID <span>for exact mapping</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="https://eu.kobotoolbox.org/#/forms/ASSET_UID/summary or ASSET_UID" /><small className="field-help">Do not paste the /x/... web-form share link here. The /x/ code is a share ID, not the Asset UID.</small><label className="field-label">Kobo API key <span>optional · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Only needed for private forms" autoComplete="off" /></div>
+                <div className="kobo-source"><label className="field-label">Kobo project Summary URL or Asset UID <span>for exact mapping</span></label><input value={koboSource} onChange={e => setKoboSource(e.target.value)} placeholder="https://eu.kobotoolbox.org/#/forms/ASSET_UID/summary or ASSET_UID" /><small className="field-help">Do not paste the /x/... web-form share link here. The /x/ code is a share ID, not the Asset UID.</small><label className="field-label">Kobo API key <span>needed for exact Asset UID mapping · not saved</span></label><input type="password" value={koboToken} onChange={e => setKoboToken(e.target.value)} placeholder="Paste your Kobo API key for exact mapping" autoComplete="off" /></div>
                 <div className="connection-result">
                   <span
                     className={koboState.offline ? 'check-icon' : 'warn-icon'}
