@@ -34,3 +34,18 @@ For exact questionnaire mapping, the UI accepts a Kobo project URL or Asset UID.
 
 npm install
 npm run dev
+
+
+## Accounts and workspace isolation
+
+FieldMind now uses Supabase Auth with email/password sign-in. Each research project, evidence source and synthetic QA draft is owned by the authenticated account. The configured administrator is `victormurimiofficial@gmail.com`; the admin can see all workspaces and has the workspace reset control. Other users can only access records owned by their account.
+
+Sessions are kept server-side in secure cookies. Do not expose the Supabase secret key in browser code.
+
+## AI quota fallback
+
+The research QA compiler treats OpenAI as an optional reasoning provider. When OpenAI returns a quota/credit error, FieldMind automatically switches to a deterministic local synthetic QA compiler so questionnaire mapping, fixture generation, review and export can continue. This is not a way to bypass OpenAI billing: it deliberately avoids the paid model call and produces clearly labelled synthetic QA fixtures using the Kobo form definition. When AI credits are available, the OpenAI brain remains available.
+
+## Resetting the previous workspace
+
+Sign in as the configured admin and use **Reset old workspace** once. It permanently clears the existing FieldMind project/source/draft records so the new multi-user workspace starts clean.
