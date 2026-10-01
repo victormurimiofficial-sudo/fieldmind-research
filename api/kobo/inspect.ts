@@ -244,6 +244,7 @@ async function inspect(url: string, source: string, token: string) {
       ? [preferred]
       : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
   const statuses: Array<{ endpoint: string; status: number; contentType?: string }> = [];
+  let assetStatus: number | undefined;
 
   // Validate the supplied token against Kobo itself before interpreting any
   // asset 404. This prevents an invalid/expired key from being misreported as
@@ -306,6 +307,7 @@ async function inspect(url: string, source: string, token: string) {
           base + '/api/v2/assets/' + encodeURIComponent(uid) + '/',
           headers
         );
+        assetStatus = metadataResult.response.status;
         statuses.push({
           endpoint: ('asset:' + base).replace(/https?:\/\//, ''),
           status: metadataResult.response.status,
@@ -353,24 +355,35 @@ async function inspect(url: string, source: string, token: string) {
   if (uid && auth) {
     for (const base of apiBases) {
       try {
-        const listEndpoint = base + '/api/v2/assets/?asset_type=survey&limit=100';
-        const result = await fetchText(listEndpoint, headers);
-        statuses.push({
-          endpoint: ('assets-list-for-uid:' + base).replace(/^https?:\/\//, ''),
-          status: result.response.status,
-          contentType: result.response.headers.get('content-type') || undefined,
-        });
-        if (!result.response.ok) continue;
+        let next = base + '/api/v2/assets/?asset_type=survey&limit=100';
+        const seenPages = new Set<string>();
+        let matchedAsset: AnyRecord | null = null;
 
-        const data = JSON.parse(result.text) as AnyRecord;
-        const results = Array.isArray(data?.results) ? data.results : [];
-        const match = results.find(item => String(item?.uid || '') === uid);
-        if (!match) continue;
+        while (next && !seenPages.has(next) && seenPages.size < 10) {
+          seenPages.add(next);
+          const result = await fetchText(next, headers);
+          statuses.push({
+            endpoint: ('assets-list-for-uid:' + next).replace(/^https?:\/\//, ''),
+            status: result.response.status,
+            contentType: result.response.headers.get('content-type') || undefined,
+          });
+          if (!result.response.ok) break;
+
+          const data = JSON.parse(result.text) as AnyRecord;
+          const results = Array.isArray(data?.results) ? data.results : [];
+          matchedAsset = results.find(item => String(item?.uid || '') === uid) || null;
+          if (matchedAsset) break;
+
+          const nextUrl = typeof data?.next === 'string' ? data.next : '';
+          next = nextUrl && nextUrl.startsWith(base) ? nextUrl : '';
+        }
+
+        if (!matchedAsset) continue;
 
         const links: string[] = [
-          typeof match?.xform_link === 'string' ? match.xform_link : '',
-          ...(Array.isArray(match?.downloads)
-            ? match.downloads
+          typeof matchedAsset.xform_link === 'string' ? matchedAsset.xform_link : '',
+          ...(Array.isArray(matchedAsset.downloads)
+            ? matchedAsset.downloads
                 .filter((item: AnyRecord) => /xform|xml/i.test(String(item?.format || item?.type || '')))
                 .map((item: AnyRecord) => String(item?.url || ''))
             : []),
@@ -501,7 +514,7 @@ async function inspect(url: string, source: string, token: string) {
     }
   } catch {}
 
-  return { failure: true, uid, shareId, statuses };
+  return { failure: true, uid, shareId, statuses, assetStatus };
 }
 function send(res: any, status: number, payload: AnyRecord) {
   res.status(status)
@@ -549,7 +562,7 @@ export default async function handler(req: any, res: any) {
       const failure = resolved as any;
       const statuses = Array.isArray(failure?.statuses) ? failure.statuses : [];
       const authRequired = statuses.some((item: any) => item.status === 401 || item.status === 403);
-      const notFound = statuses.some((item: any) => item.status === 404);
+      const notFound = Number(failure?.assetStatus) === 404;
 
       if (!failure?.uid && failure?.shareId) {
         send(res, 422, {
