@@ -234,6 +234,7 @@ function App() {
   const confirmed = projectDrafts.length > 0 && projectDrafts.every(d => d.status === 'confirmed' || d.status === 'deployed');
   const hasRejectedFields = projectDrafts.some(d => d.fields.some(f => f.status === 'rejected'));
   const approved = projectDrafts.reduce((n, d) => n + d.fields.filter(f => f.status === 'approved').length, 0);
+  const testReadyCount = projectDrafts.filter(d => (d.status === 'confirmed' || d.status === 'deployed') && !d.testSubmission).length;
 
   useEffect(() => {
     let alive = true;
@@ -1519,11 +1520,11 @@ function App() {
                   form to verify the complete submission pipeline. This is a test action only.
                 </p>
                 <div className="audit-count">
-                  <strong>{confirmed ? projectDrafts.length : 0}</strong>
-                  <span>synthetic fixtures ready</span>
+                  <strong>{testReadyCount}</strong>
+                  <span>new synthetic fixtures ready</span>
                 </div>
-                <button className="secondary" disabled={!confirmed || isSubmittingTest} onClick={() => setShowTestSubmitModal(true)}>
-                  {confirmed ? 'Submit synthetic QA to Kobo' : 'Locked until confirmation'} <ArrowRight size={15} />
+                <button className="secondary" disabled={!confirmed || !testReadyCount || isSubmittingTest} onClick={() => setShowTestSubmitModal(true)}>
+                  {testReadyCount ? 'Submit synthetic QA to Kobo' : 'No new QA batch to submit'} <ArrowRight size={15} />
                 </button>
                 <button className="text-button" disabled={!confirmed} onClick={deployPackage}>
                   Prepare local QA package instead
@@ -1557,13 +1558,13 @@ function App() {
               </div>
               <div className="edit-note">
                 <ShieldCheck size={15} />
-                This will create {projectDrafts.length} clearly synthetic test submissions in the connected Kobo project.
+                This will create {testReadyCount} clearly synthetic test submissions in the connected Kobo project.
               </div>
               <p className="field-help" style={{ marginTop: 14 }}>
                 Use a Kobo project reserved for testing. FieldMind will submit each confirmed fixture as a separate anonymous OpenRosa test submission. It does not use participant data.
               </p>
               <div className="audit-count" style={{ margin: '18px 0' }}>
-                <strong>{projectDrafts.length}</strong>
+                <strong>{testReadyCount}</strong>
                 <span>submissions queued for this test</span>
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
