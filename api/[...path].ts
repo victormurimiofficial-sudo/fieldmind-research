@@ -767,6 +767,19 @@ export default async function handler(req: any, res: any) {
         return;
       }
       const resolved = await inspectKobo(url, String(body.assetUid || ''), String(body.apiToken || ''));
+      if ((resolved as any)?.needsSelection) {
+        send(res, 200, {
+          reachable: true,
+          mapped: false,
+          needsSelection: true,
+          shareId: (resolved as any).shareId || '',
+          candidates: (resolved as any).candidates || [],
+          questionCount: 0,
+          fields: [],
+          message: 'This /x/ link was found through your Kobo account. Select the matching project below; FieldMind will retrieve its XForm automatically.',
+        });
+        return;
+      }
       if (!resolved || (resolved as any).failure) {
         const failure = resolved as any;
         const diagnostics = Array.isArray(failure?.diagnostics) ? failure.diagnostics : [];
