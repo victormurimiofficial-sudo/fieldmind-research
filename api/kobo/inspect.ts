@@ -245,8 +245,36 @@ async function inspect(url: string, source: string, token: string) {
       : ['https://kf.kobotoolbox.org', 'https://eu.kobotoolbox.org'];
   const statuses: Array<{ endpoint: string; status: number; contentType?: string }> = [];
 
+  // Validate the supplied token against Kobo itself before interpreting any
+  // asset 404. This prevents an invalid/expired key from being misreported as
+  // an Asset UID problem.
+  const authenticatedBases: string[] = [];
+  if (auth) {
+    for (const base of apiBases) {
+      try {
+        const me = await fetchText(base + '/me/', headers);
+        statuses.push({
+          endpoint: ('me:' + base).replace(/^https?:\/\//, ''),
+          status: me.response.status,
+          contentType: me.response.headers.get('content-type') || undefined,
+        });
+        if (me.response.ok) authenticatedBases.push(base);
+      } catch {}
+    }
+    if (!authenticatedBases.length) {
+      return {
+        failure: true,
+        uid,
+        shareId,
+        statuses,
+      };
+    }
+  }
+
+  const apiBases = authenticatedBases.length ? authenticatedBases : bases;
+
   if (uid) {
-    for (const base of bases) {
+    for (const base of apiBases) {
       // The deployed XForm endpoint is the authoritative questionnaire
       // definition. Try it first instead of depending on asset metadata shape.
       const directCandidates = [
@@ -323,7 +351,7 @@ async function inspect(url: string, source: string, token: string) {
   // survey list and use the XForm link exposed by the asset serializer as a
   // second, authoritative resolution path.
   if (uid && auth) {
-    for (const base of bases) {
+    for (const base of apiBases) {
       try {
         const listEndpoint = base + '/api/v2/assets/?asset_type=survey&limit=100';
         const result = await fetchText(listEndpoint, headers);
@@ -381,7 +409,7 @@ async function inspect(url: string, source: string, token: string) {
     // deployment__links. That link contains the same /x/<shareId> value the
     // user pasted. Use it to resolve the Asset UID automatically instead of
     // making the user understand Kobo's internal IDs.
-    for (const base of bases) {
+    for (const base of apiBases) {
       try {
         let next = base + '/api/v2/assets/?asset_type=survey&limit=100';
         const candidates: AnyRecord[] = [];
