@@ -126,6 +126,8 @@ function App() {
   const [koboUrl, setKoboUrl] = useState('');
   const [koboToken, setKoboToken] = useState('');
   const [koboState, setKoboState] = useState({ checked: false, offline: false, title: 'Not inspected', questionCount: 0, error: '' });
+  const [koboCandidates, setKoboCandidates] = useState<{ uid: string; name: string; url: string }[]>([]);
+  const [koboCandidateUid, setKoboCandidateUid] = useState('');
   const [draftCount, setDraftCount] = useState(1);
   const [backendState, setBackendState] = useState<'checking'|'ready'|'error'>('checking');
   const [ageMix, setAgeMix] = useState('18–29: 25% · 30–39: 35% · 40–49: 25% · 50–59: 15%');
@@ -187,23 +189,70 @@ function App() {
   }, [toast]);
 
   const checkKobo = async () => {
-    setKoboState(s => ({ ...s, checked: false }));
+    setKoboState(s => ({ ...s, checked: false, error: '' }));
     try {
-      const result = await api.post('/api/kobo/inspect', { url: koboUrl.trim(), apiToken: koboToken.trim() });
-      const mapped = Array.isArray(result.data?.fields) ? result.data.fields : [];
+      const result = await api.post('/api/kobo/inspect', {
+        url: koboUrl.trim(),
+        apiToken: koboToken.trim(),
+        ...(koboCandidateUid ? { assetUid: koboCandidateUid } : {}),
+      });
+      const data = result.data || {};
+
+      if (data.needsSelection) {
+        const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+        setKoboCandidates(candidates);
+        setKoboCandidateUid(candidates.length === 1 ? candidates[0].uid : '');
+        setFields([]);
+        setKoboState({
+          checked: true,
+          offline: false,
+          title: 'Select your Kobo project',
+          questionCount: 0,
+          error: '',
+        });
+        setToast(candidates.length
+          ? 'Kobo link found. Select the matching project, then tap Check again.'
+          : 'Kobo accepted the API key but returned no accessible survey projects.');
+        return;
+      }
+
+      const mapped = Array.isArray(data.fields) ? data.fields : [];
+      setKoboCandidates([]);
+      setKoboCandidateUid('');
       setFields(mapped);
-      setKoboState({ checked: true, offline: Boolean(result.data?.offlineReady), title: result.data?.title || 'Kobo form', questionCount: mapped.length, error: '' });
+      setKoboState({
+        checked: true,
+        offline: Boolean(data.offlineReady),
+        title: data.title || 'Kobo form',
+        questionCount: mapped.length,
+        error: '',
+      });
       if (selectedProject.id) {
-        const updatedProject = { ...selectedProject, koboUrl, formStatus: mapped.length ? 'Connected' : 'Needs inspection', offlineReady: Boolean(result.data?.offlineReady), updatedAt: 'Just now' };
+        const updatedProject = {
+          ...selectedProject,
+          koboUrl,
+          formStatus: mapped.length ? 'Connected' : 'Needs inspection',
+          offlineReady: Boolean(data.offlineReady),
+          updatedAt: 'Just now',
+        };
         await api.put('/api/projects/' + selectedProject.id, updatedProject);
         setSelectedProject(updatedProject);
         setProjects(all => all.map(p => p.id === updatedProject.id ? updatedProject : p));
       }
-      setToast(mapped.length ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.' : 'The form is reachable, but no questions were mapped.');
+      setToast(mapped.length
+        ? 'Mapped ' + mapped.length + ' form questions. QA generation is ready.'
+        : 'The form is reachable, but no questions were mapped.');
     } catch (e) {
       setFields([]);
+      setKoboCandidates([]);
       const message = e instanceof Error ? e.message : 'Could not inspect that Kobo form.';
-      setKoboState({ checked: true, offline: false, title: 'Inspection failed', questionCount: 0, error: message });
+      setKoboState({
+        checked: true,
+        offline: false,
+        title: 'Inspection failed',
+        questionCount: 0,
+        error: message,
+      });
       setToast('Kobo inspection: ' + message);
     }
   };
@@ -617,6 +666,23 @@ function App() {
                   </button>
                 </div>
                 <p className="field-help">Paste one Kobo link. FieldMind detects the server and Asset UID automatically, then retrieves the deployed XForm.</p>
+                {koboCandidates.length > 0 && (
+                  <div className="kobo-candidates">
+                    <label className="field-label">Choose the Kobo project</label>
+                    <select
+                      value={koboCandidateUid}
+                      onChange={e => setKoboCandidateUid(e.target.value)}
+                    >
+                      <option value="">Select the matching project…</option>
+                      {koboCandidates.map(candidate => (
+                        <option key={candidate.uid} value={candidate.uid}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="field-help">FieldMind found these surveys through your Kobo account. Select the one behind this /x/ link and tap Check again.</p>
+                  </div>
+                )}
                 <details className="kobo-advanced">
                   <summary>Advanced: private Kobo form / API key</summary>
                   <label className="field-label">Kobo API key <span>used for this inspection · not saved</span></label>
